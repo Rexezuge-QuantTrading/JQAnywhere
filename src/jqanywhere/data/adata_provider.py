@@ -36,25 +36,115 @@ class ADataMarketDataProvider(MarketDataProvider):
         self.strict_current_date = strict_current_date
 
     def attribute_history(self, security: str, count: int, unit: str, fields, skip_paused: bool, df: bool, fq: str | None):
-        field_list = [fields] if isinstance(fields, str) else list(fields)
-        raw = self._fetch_history(security, count, unit, fq)
-        data = self._format_history(raw, unit, field_list, skip_paused)
-        data = data.tail(count)
+        field_list = _field_list(fields)
+        unit_value, unit_kind = _parse_unit(unit)
+        _validate_count(count)
+        _validate_fq(fq)
+        _validate_fields(field_list, unit_value)
+        end_dt = _history_end(unit_kind)
+        raw = self._fetch_history(security, count, unit_value, unit_kind, fq, end_dt=end_dt)
+        data = self._format_history(raw, field_list, skip_paused, fill_paused=True)
+        data = _resample_bars(data, unit_value, unit_kind, field_list).tail(count)
         return data if df else {field: data[field].to_numpy() for field in field_list}
 
     def get_current_data(self) -> dict[str, CurrentData]:
         return LazyCurrentData(self._fetch_current_data)
 
-    def _fetch_history(self, security: str, count: int, unit: str, fq: str | None) -> pd.DataFrame:
+    def get_price(
+        self,
+        security,
+        start_date=None,
+        end_date=None,
+        frequency="daily",
+        fields=None,
+        skip_paused=False,
+        fq="pre",
+        count=None,
+        panel=True,
+        fill_paused=True,
+    ):
+        securities = [security] if isinstance(security, str) else list(security)
+        if not securities:
+            raise ValueError("security must not be empty")
+        if count is not None and start_date is not None:
+            raise ValueError("count and start_date are mutually exclusive")
+        if skip_paused and len(securities) > 1 and panel:
+            raise ValueError("skip_paused=True for multiple securities requires panel=False")
+
+        field_list = _field_list(fields or _STANDARD_FIELDS)
+        unit_value, unit_kind = _normalize_frequency(frequency)
+        _validate_fq(fq)
+        _validate_fields(field_list, unit_value)
+        end_dt = _coerce_end_date(end_date, unit_kind)
+        if count is None and start_date is None:
+            raise ValueError("get_price requires count or start_date for AData-backed requests")
+        if count is not None:
+            _validate_count(count)
+        start_dt = _coerce_start_date(start_date, unit_kind) if start_date is not None else None
+
+        frames = {}
+        for code in securities:
+            fetch_count = count if count is not None else _estimated_count(start_dt, end_dt, unit_value, unit_kind)
+            raw = self._fetch_history(code, fetch_count, unit_value, unit_kind, fq, end_dt=end_dt, start_dt=start_dt)
+            frame = self._format_history(raw, field_list, skip_paused, fill_paused)
+            frame = _resample_bars(frame, unit_value, unit_kind, field_list)
+            if start_dt is not None:
+                frame = frame[frame.index >= start_dt]
+            frame = frame[frame.index <= end_dt]
+            if count is not None:
+                frame = frame.tail(count)
+            frames[code] = frame
+
+        if len(securities) == 1:
+            return frames[securities[0]]
+        if panel:
+            return {field: pd.concat({code: frames[code][field] for code in securities}, axis=1) for field in field_list}
+        return pd.concat(frames, names=["security", "datetime"])
+
+    def get_index_stocks(self, index_symbol: str, date=None) -> list[str]:
+        code = _security_code(index_symbol)
+        trade_date = _coerce_date(date or datetime.now()).strftime("%Y-%m-%d")
+        candidates = [
+            (getattr(getattr(self.adata, "stock", None), "info", None), "get_index_stocks"),
+            (getattr(getattr(self.adata, "stock", None), "info", None), "get_index_stock_cons"),
+            (getattr(getattr(self.adata, "stock", None), "market", None), "get_index_stocks"),
+        ]
+        for owner, name in candidates:
+            method = getattr(owner, name, None)
+            if method is None:
+                continue
+            raw = method(index_code=code, date=trade_date)
+            if raw is None:
+                return []
+            if isinstance(raw, pd.DataFrame):
+                for column in ("stock_code", "code", "constituent_code"):
+                    if column in raw.columns:
+                        return [_jq_code(value) for value in raw[column].dropna().astype(str).tolist()]
+                return []
+            return [_jq_code(value) for value in raw]
+        raise NotImplementedError("Installed adata package does not expose index constituent data")
+
+    def _fetch_history(
+        self,
+        security: str,
+        count: int,
+        unit_value: int,
+        unit_kind: str,
+        fq: str | None,
+        *,
+        end_dt: datetime,
+        start_dt: datetime | None = None,
+    ) -> pd.DataFrame:
         code = _security_code(security)
-        end_dt, start_dt, k_type = _history_window(count, unit)
+        explicit_start = start_dt is not None
+        start_dt = start_dt or _history_start(count, unit_value, unit_kind, end_dt)
         adjust_type = {"pre": 1, "post": 2, None: 0}.get(fq, 1)
-        buffer_days = (end_dt - start_dt).days
+        buffer_days = max((end_dt - start_dt).days, 1)
 
         for _attempt in range(2):
             try:
                 if _is_etf(code):
-                    if not unit.endswith("d"):
+                    if unit_kind != "d":
                         raise NotImplementedError("AData ETF minute history is not supported")
                     raw = self.adata.fund.market.get_market_etf(
                         fund_code=code,
@@ -62,7 +152,7 @@ class ADataMarketDataProvider(MarketDataProvider):
                         start_date=start_dt.strftime("%Y-%m-%d"),
                         end_date=end_dt.strftime("%Y-%m-%d"),
                     )
-                elif unit.endswith("d"):
+                elif unit_kind == "d":
                     raw = self.adata.stock.market.get_market(
                         stock_code=code,
                         k_type=1,
@@ -72,6 +162,8 @@ class ADataMarketDataProvider(MarketDataProvider):
                     )
                 else:
                     raw = self.adata.stock.market.get_market_min(stock_code=code)
+            except NotImplementedError:
+                raise
             except Exception as exc:
                 raise RuntimeError(f"Failed to fetch market history for {security}: {exc}") from exc
 
@@ -79,8 +171,10 @@ class ADataMarketDataProvider(MarketDataProvider):
                 result = raw.copy()
                 time_col = "trade_time" if "trade_time" in result.columns else "trade_date"
                 result.index = pd.to_datetime(result[time_col])
+                result = result.sort_index()
+                result = result[result.index >= start_dt]
                 result = result[result.index <= end_dt]
-                if len(result) >= count:
+                if explicit_start or len(result) >= count:
                     return result
 
             buffer_days *= 2
@@ -88,7 +182,7 @@ class ADataMarketDataProvider(MarketDataProvider):
 
         raise ValueError(f"No market history found for {security}")
 
-    def _format_history(self, raw: pd.DataFrame, unit: str, fields: list[str], skip_paused: bool) -> pd.DataFrame:
+    def _format_history(self, raw: pd.DataFrame, fields: list[str], skip_paused: bool, fill_paused: bool) -> pd.DataFrame:
         field_map = {
             "open": "open",
             "close": "close",
@@ -100,6 +194,8 @@ class ADataMarketDataProvider(MarketDataProvider):
             "pre_close": "pre_close",
             "high_limit": "high_limit",
             "low_limit": "low_limit",
+            "avg": "avg",
+            "open_interest": "open_interest",
         }
         available = {field_map.get(field, field): field for field in fields if field_map.get(field, field) in raw.columns}
         data = raw[list(available.keys())].copy() if available else pd.DataFrame(index=raw.index)
@@ -108,17 +204,27 @@ class ADataMarketDataProvider(MarketDataProvider):
         for col in data.columns:
             data[col] = pd.to_numeric(data[col], errors="coerce")
 
+        pause_series = None
+        if "volume" in data.columns:
+            pause_series = data["volume"] == 0
+        elif "volume" in raw.columns:
+            pause_series = pd.to_numeric(raw["volume"], errors="coerce") == 0
         if "paused" in fields and "paused" not in data.columns:
-            data["paused"] = (data["volume"] == 0).astype(int) if "volume" in data.columns else 0
+            data["paused"] = pause_series.astype(int) if pause_series is not None else 0
 
-        if not skip_paused and unit.endswith("d") and not data.empty:
-            data = data.reindex(pd.bdate_range(start=data.index.min(), end=data.index.max())).ffill()
-            if "volume" in data.columns and "paused" in data.columns:
-                data.loc[data["paused"] == 1, "volume"] = 0.0
-            if "money" in data.columns and "paused" in data.columns:
-                data.loc[data["paused"] == 1, "money"] = 0.0
-        elif skip_paused and "volume" in data.columns:
+        if skip_paused and "volume" in data.columns:
             data = data[data["volume"] > 0]
+        elif skip_paused and "paused" in data.columns:
+            data = data[data["paused"] == 0]
+        elif fill_paused and not data.empty:
+            price_fields = [
+                field for field in ("open", "close", "high", "low", "avg", "pre_close", "high_limit", "low_limit") if field in data
+            ]
+            if price_fields:
+                data.loc[:, price_fields] = data.loc[:, price_fields].ffill()
+            for field in ("volume", "money"):
+                if field in data and pause_series is not None:
+                    data.loc[pause_series, field] = 0.0
 
         for field in fields:
             if field not in data.columns:
@@ -139,13 +245,27 @@ class ADataMarketDataProvider(MarketDataProvider):
             return CurrentData(security=security, paused=True)
 
         row = raw.iloc[0]
-        price = _row_get(row, "price")
+        price = _first_row_value(row, "price", "last_price", "close")
         volume = _row_get(row, "volume", 0)
         trade_date = _row_get(row, "trade_date")
         paused = price is None or pd.isna(price) or volume is None or float(volume) == 0
         if self.strict_current_date and trade_date is not None:
             paused = paused or _parse_date(trade_date) != date.today()
-        return CurrentData(security=security, paused=paused, last_price=None if price is None or pd.isna(price) else float(price))
+        return CurrentData(
+            security=security,
+            paused=paused,
+            last_price=_float_or_none(price),
+            high_limit=_float_or_none(_row_get(row, "high_limit")),
+            low_limit=_float_or_none(_row_get(row, "low_limit")),
+            is_st=_bool_or_none(_first_row_value(row, "is_st", "st")),
+            day_open=_float_or_none(_first_row_value(row, "day_open", "open")),
+            name=_row_get(row, "name"),
+            industry_code=_row_get(row, "industry_code"),
+        )
+
+
+_STANDARD_FIELDS = ["open", "close", "high", "low", "volume", "money"]
+_MULTI_PERIOD_FIELDS = set(_STANDARD_FIELDS)
 
 
 def _security_code(security: str) -> str:
@@ -156,21 +276,143 @@ def _is_etf(code: str) -> bool:
     return code.startswith(("51", "15", "58", "56"))
 
 
-def _history_window(count: int, unit: str) -> tuple[datetime, datetime, int]:
+def _parse_unit(unit: str) -> tuple[int, str]:
+    if not isinstance(unit, str) or len(unit) < 2 or unit[-1] not in {"d", "m"}:
+        raise ValueError("unit must use Xd or Xm format")
+    try:
+        value = int(unit[:-1])
+    except ValueError as exc:
+        raise ValueError("unit must use Xd or Xm format") from exc
+    if value <= 0:
+        raise ValueError("unit value must be positive")
+    return value, unit[-1]
+
+
+def _normalize_frequency(frequency: str) -> tuple[int, str]:
+    aliases = {"daily": "1d", "day": "1d", "minute": "1m"}
+    return _parse_unit(aliases.get(frequency, frequency))
+
+
+def _history_end(unit_kind: str) -> datetime:
     now = datetime.now()
-    if unit.endswith("d"):
-        unit_val = int(unit[:-1])
-        end_dt = now.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=1)
-        buffer_days = int(count * unit_val * 1.5) + 30
-        return end_dt, end_dt - timedelta(days=buffer_days), 1
-    if unit.endswith("m"):
-        k_type = int(unit[:-1])
-        if k_type not in [1, 5, 15, 30, 60]:
-            raise ValueError("unit must be one of '1m', '5m', '15m', '30m', or '60m'")
-        end_dt = now.replace(second=0, microsecond=0) - timedelta(minutes=1)
-        buffer_days = int(math.ceil(count / (240 / k_type)) * 1.5) + 15
-        return end_dt, end_dt - timedelta(days=buffer_days), k_type
-    raise ValueError("unit must use Xd or Xm format")
+    if unit_kind == "d":
+        return now.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=1)
+    return now.replace(second=0, microsecond=0) - timedelta(minutes=1)
+
+
+def _history_start(count: int, unit_value: int, unit_kind: str, end_dt: datetime) -> datetime:
+    buffer_days = int(count * unit_value * 1.8) + 30 if unit_kind == "d" else int(math.ceil(count * unit_value / 240) * 1.8) + 15
+    return end_dt - timedelta(days=buffer_days)
+
+
+def _validate_count(count: int) -> None:
+    if not isinstance(count, int) or count <= 0:
+        raise ValueError("count must be a positive integer")
+
+
+def _validate_fq(fq: str | None) -> None:
+    if fq not in {"pre", "post", None}:
+        raise ValueError("fq must be 'pre', 'post', or None")
+
+
+def _validate_fields(fields: list[str], unit_value: int) -> None:
+    if not fields:
+        raise ValueError("fields must not be empty")
+    if unit_value > 1 and any(field not in _MULTI_PERIOD_FIELDS for field in fields):
+        raise NotImplementedError("multi-period bars only support open, close, high, low, volume, and money")
+
+
+def _field_list(fields) -> list[str]:
+    return [fields] if isinstance(fields, str) else list(fields)
+
+
+def _resample_bars(data: pd.DataFrame, unit_value: int, unit_kind: str, fields: list[str]) -> pd.DataFrame:
+    if unit_value == 1 or data.empty:
+        return data[fields]
+    del unit_kind
+    result = pd.DataFrame(index=data.index)
+    if "open" in data:
+        result["open"] = data["open"].rolling(unit_value).apply(lambda values: values[0], raw=True)
+    if "close" in data:
+        result["close"] = data["close"]
+    if "high" in data:
+        result["high"] = data["high"].rolling(unit_value).max()
+    if "low" in data:
+        result["low"] = data["low"].rolling(unit_value).min()
+    if "volume" in data:
+        result["volume"] = data["volume"].rolling(unit_value).sum()
+    if "money" in data:
+        result["money"] = data["money"].rolling(unit_value).sum()
+    result = result.iloc[unit_value - 1 :].dropna(how="all")
+    for field in fields:
+        if field not in result:
+            result[field] = np.nan
+    return result[fields]
+
+
+def _coerce_end_date(value, unit_kind: str) -> datetime:
+    if value is None:
+        return _history_end(unit_kind)
+    dt = _coerce_datetime(value)
+    if unit_kind == "d":
+        return dt.replace(hour=0, minute=0, second=0, microsecond=0)
+    return dt.replace(second=0, microsecond=0)
+
+
+def _coerce_start_date(value, unit_kind: str) -> datetime:
+    dt = _coerce_datetime(value)
+    if unit_kind == "d":
+        return dt.replace(hour=0, minute=0, second=0, microsecond=0)
+    return dt.replace(second=0, microsecond=0)
+
+
+def _coerce_datetime(value) -> datetime:
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, date):
+        return datetime.combine(value, datetime.min.time())
+    if isinstance(value, str):
+        return pd.to_datetime(value).to_pydatetime()
+    raise TypeError("date values must be strings, date, or datetime")
+
+
+def _coerce_date(value) -> date:
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    if isinstance(value, str):
+        return pd.to_datetime(value).date()
+    raise TypeError("date values must be strings, date, or datetime")
+
+
+def _estimated_count(start_dt: datetime, end_dt: datetime, unit_value: int, unit_kind: str) -> int:
+    if unit_kind == "d":
+        return max((end_dt - start_dt).days // unit_value + 1, 1)
+    return max(int((end_dt - start_dt).total_seconds() // 60 // unit_value) + 1, 1)
+
+
+def _jq_code(code: Any) -> str:
+    text = str(code)
+    if "." in text:
+        return text
+    return f"{text}.XSHG" if text.startswith(("5", "6", "9")) else f"{text}.XSHE"
+
+
+def _first_row_value(row: Any, *keys: str):
+    for key in keys:
+        value = _row_get(row, key)
+        if value is not None and not pd.isna(value):
+            return value
+    return None
+
+
+def _float_or_none(value) -> float | None:
+    return None if value is None or pd.isna(value) else float(value)
+
+
+def _bool_or_none(value) -> bool | None:
+    return None if value is None or pd.isna(value) else bool(value)
 
 
 def _row_get(row: Any, key: str, default=None):

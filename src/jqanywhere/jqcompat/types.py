@@ -79,6 +79,12 @@ class CurrentData:
     security: str
     paused: bool = False
     last_price: float | None = None
+    high_limit: float | None = None
+    low_limit: float | None = None
+    is_st: bool | None = None
+    day_open: float | None = None
+    name: str | None = None
+    industry_code: str | None = None
 
 
 @dataclass
