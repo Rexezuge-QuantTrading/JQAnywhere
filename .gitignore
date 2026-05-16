@@ -113,6 +113,9 @@ dist
 # Serverless directories
 .serverless/
 
+# Private strategy assets
+private/
+
 # FuseBox cache
 .fusebox/
 

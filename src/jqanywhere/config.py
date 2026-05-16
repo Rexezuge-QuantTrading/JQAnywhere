@@ -21,6 +21,12 @@ class RuntimeConfig:
 
 
 @dataclass(frozen=True)
+class DataConfig:
+    provider: str = "empty"
+    strict_current_date: bool = False
+
+
+@dataclass(frozen=True)
 class BrokerConfig:
     provider: str = "paper"
     initial_cash: float = 100_000.0
@@ -41,6 +47,7 @@ class NotificationConfig:
 class AppConfig:
     strategy: StrategyConfig
     runtime: RuntimeConfig
+    data: DataConfig
     broker: BrokerConfig
     persistence: PersistenceConfig
     notifications: NotificationConfig
@@ -60,6 +67,7 @@ def load_config(path: str | Path | None = None) -> AppConfig:
 
     strategy_id = os.getenv("JQANYWHERE_STRATEGY_ID", strategy_data.get("id", Path(strategy_path).stem))
     runtime_data = data.get("runtime", {})
+    market_data = data.get("data", {})
     broker_data = data.get("broker", {})
     persistence_data = data.get("persistence", {})
     notification_data = data.get("notifications", {})
@@ -69,6 +77,10 @@ def load_config(path: str | Path | None = None) -> AppConfig:
         runtime=RuntimeConfig(
             timezone=os.getenv("JQANYWHERE_TIMEZONE", runtime_data.get("timezone", "Asia/Shanghai")),
             mode=os.getenv("JQANYWHERE_MODE", runtime_data.get("mode", "paper")),
+        ),
+        data=DataConfig(
+            provider=os.getenv("JQANYWHERE_DATA_PROVIDER", market_data.get("provider", "empty")),
+            strict_current_date=_bool_env("JQANYWHERE_DATA_STRICT_CURRENT_DATE", market_data.get("strict_current_date", False)),
         ),
         broker=BrokerConfig(
             provider=os.getenv("JQANYWHERE_BROKER", broker_data.get("provider", "paper")),
@@ -82,3 +94,10 @@ def load_config(path: str | Path | None = None) -> AppConfig:
             provider=os.getenv("JQANYWHERE_NOTIFIER", notification_data.get("provider", "console")),
         ),
     )
+
+
+def _bool_env(name: str, default: bool) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return bool(default)
+    return value.lower() in {"1", "true", "yes", "on"}

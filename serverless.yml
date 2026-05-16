@@ -63,6 +63,7 @@ package:
   patterns:
     - src/**
     - examples/**
+    - private/**
     - jqanywhere.toml
     - '!tests/**'
     - '!.venv/**'
