@@ -1,0 +1,109 @@
+"""JoinQuant-compatible public API subset."""
+
+from __future__ import annotations
+
+from jqanywhere.jqcompat.types import *
+from jqanywhere.runtime.state import get_session
+
+try:
+    import numpy as np
+except ModuleNotFoundError:  # pragma: no cover - dependency is installed in normal package usage.
+    np = None
+
+
+def set_benchmark(security: str) -> None:
+    get_session().benchmark = security
+
+
+def set_option(key: str, value) -> None:
+    get_session().options[key] = value
+
+
+def set_order_cost(cost: OrderCost, type="stock", ref=None) -> None:
+    get_session().order_cost = cost
+
+
+def set_commission(cost: PerTrade) -> None:
+    get_session().order_cost = cost
+
+
+def set_slippage(obj: FixedSlippage, type=None, ref=None) -> None:
+    get_session().slippage = obj
+
+
+def run_daily(func, time: str, reference_security: str = "") -> None:
+    get_session().scheduler.run_daily(func, time, reference_security)
+
+
+def attribute_history(
+    security: str,
+    count: int,
+    unit: str = "1d",
+    fields=("open", "close", "high", "low", "volume", "money"),
+    skip_paused: bool = True,
+    df: bool = True,
+    fq: str | None = "pre",
+):
+    return get_session().data.attribute_history(security, count, unit, fields, skip_paused, df, fq)
+
+
+def get_current_data():
+    return get_session().data.get_current_data()
+
+
+def order_target_value(security: str, value: float, style=MarketOrderStyle, side: str = "long", pindex: int = 0, close_today: bool = False):
+    session = get_session()
+    order_result = session.broker.order_target_value(
+        session.context, security, value, style=style, side=side, pindex=pindex, close_today=close_today
+    )
+    session.log.info(f"order_target_value({security}, {value}) -> {order_result}")
+    return order_result
+
+
+def order_target(security: str, amount: int, style=MarketOrderStyle, side: str = "long", pindex: int = 0, close_today: bool = False):
+    session = get_session()
+    return session.broker.order_target(session.context, security, amount, style=style, side=side, pindex=pindex, close_today=close_today)
+
+
+def order(security: str, amount: int, style=MarketOrderStyle, side: str = "long", pindex: int = 0, close_today: bool = False):
+    session = get_session()
+    return session.broker.order(session.context, security, amount, style=style, side=side, pindex=pindex, close_today=close_today)
+
+
+def order_value(security: str, value: float, style=MarketOrderStyle, side: str = "long", pindex: int = 0, close_today: bool = False):
+    session = get_session()
+    return session.broker.order_value(session.context, security, value, style=style, side=side, pindex=pindex, close_today=close_today)
+
+
+def get_price(*args, **kwargs):
+    return get_session().data.get_price(*args, **kwargs)
+
+
+def get_index_stocks(*args, **kwargs):
+    return get_session().data.get_index_stocks(*args, **kwargs)
+
+
+def unsupported(name: str):
+    raise NotImplementedError(f"JQAnywhere v0.1 does not support {name}")
+
+
+def get_fundamentals(*args, **kwargs):
+    unsupported("get_fundamentals")
+
+
+def query(*args, **kwargs):
+    unsupported("query/fundamentals DSL")
+
+
+class _UnsupportedTable:
+    def __getattr__(self, name):
+        unsupported(f"fundamentals field {name}")
+
+
+valuation = _UnsupportedTable()
+balance = _UnsupportedTable()
+cash_flow = _UnsupportedTable()
+income = _UnsupportedTable()
+indicator = _UnsupportedTable()
+
+__all__ = [name for name in globals() if not name.startswith("_")]
