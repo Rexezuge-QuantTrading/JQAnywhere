@@ -1,0 +1,18 @@
+[strategy]
+id = "simple_daily_allocation"
+path = "examples/simple_daily_allocation.py"
+
+[runtime]
+timezone = "Asia/Shanghai"
+mode = "paper"
+
+[broker]
+provider = "paper"
+initial_cash = 100000
+
+[persistence]
+provider = "memory"
+table_name = "jqanywhere-state"
+
+[notifications]
+provider = "console"

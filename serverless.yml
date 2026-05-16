@@ -1,0 +1,75 @@
+service: jqanywhere
+
+plugins:
+  - serverless-localstack
+
+provider:
+  name: aws
+  runtime: '${env:LAMBDA_RUNTIME, "python3.11"}'
+  architecture: '${env:LAMBDA_ARCHITECTURE, "x86_64"}'
+  region: '${env:AWS_REGION, "us-east-1"}'
+  versionFunctions: false
+  environment:
+    PYTHONPATH: /var/task/src
+    JQANYWHERE_CONFIG: '${env:JQANYWHERE_CONFIG, "jqanywhere.toml"}'
+    JQANYWHERE_STRATEGY_PATH: '${env:JQANYWHERE_STRATEGY_PATH, "examples/simple_daily_allocation.py"}'
+    JQANYWHERE_PERSISTENCE: dynamodb
+    JQANYWHERE_STATE_TABLE: '${self:service}-state'
+    JQANYWHERE_NOTIFIER: sns
+    AWS_ENDPOINT_URL: '${env:AWS_ENDPOINT_URL, ""}'
+    SNS_TOPIC_ARN:
+      Ref: NotificationTopic
+  iam:
+    role:
+      statements:
+        - Effect: Allow
+          Action:
+            - dynamodb:GetItem
+            - dynamodb:PutItem
+          Resource:
+            - Fn::GetAtt: [StateTable, Arn]
+        - Effect: Allow
+          Action:
+            - sns:Publish
+          Resource:
+            Ref: NotificationTopic
+
+functions:
+  runner:
+    handler: jqanywhere.runtime.lambda_handler.run
+    timeout: 900
+    events:
+      - schedule: cron(50 1 * * ? *)
+
+resources:
+  Resources:
+    StateTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: '${self:provider.environment.JQANYWHERE_STATE_TABLE}'
+        AttributeDefinitions:
+          - AttributeName: id
+            AttributeType: S
+        KeySchema:
+          - AttributeName: id
+            KeyType: HASH
+        BillingMode: PAY_PER_REQUEST
+    NotificationTopic:
+      Type: AWS::SNS::Topic
+      Properties:
+        TopicName: '${self:service}-notifications'
+
+package:
+  patterns:
+    - src/**
+    - examples/**
+    - jqanywhere.toml
+    - '!tests/**'
+    - '!.venv/**'
+
+custom:
+  localstack:
+    stages:
+      - local
+    host: http://localhost
+    edgePort: 4566
