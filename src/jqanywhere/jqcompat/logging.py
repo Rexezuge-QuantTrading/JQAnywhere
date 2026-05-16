@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-
 LEVELS = {"debug": 10, "info": 20, "warn": 30, "warning": 30, "error": 40}
 
 

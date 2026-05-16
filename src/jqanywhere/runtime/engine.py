@@ -17,7 +17,16 @@ from jqanywhere.runtime.state import G, RuntimeSession, bind_session, reset_sess
 
 
 class RuntimeEngine:
-    def __init__(self, strategy_id: str, strategy_path: str | Path, data: MarketDataProvider, broker: Broker, state_store: StateStore, notifier: Notifier, initial_cash: float = 100_000.0):
+    def __init__(
+        self,
+        strategy_id: str,
+        strategy_path: str | Path,
+        data: MarketDataProvider,
+        broker: Broker,
+        state_store: StateStore,
+        notifier: Notifier,
+        initial_cash: float = 100_000.0,
+    ):
         self.strategy_id = strategy_id
         self.strategy_path = Path(strategy_path)
         self.data = data
@@ -46,6 +55,12 @@ class RuntimeEngine:
             self.state_store.save(self.strategy_id, state)
             logs = log.flush_text()
             self.notifier.send(f"JQAnywhere {self.strategy_id}", logs)
-            return {"status": "completed", "strategy_id": self.strategy_id, "logs": logs, "state": state, "portfolio_value": context.portfolio.total_value}
+            return {
+                "status": "completed",
+                "strategy_id": self.strategy_id,
+                "logs": logs,
+                "state": state,
+                "portfolio_value": context.portfolio.total_value,
+            }
         finally:
             reset_session(token)

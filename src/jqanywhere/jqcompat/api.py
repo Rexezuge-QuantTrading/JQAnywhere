@@ -2,9 +2,6 @@
 
 from __future__ import annotations
 
-import datetime
-from math import isnan
-
 from jqanywhere.jqcompat.types import *
 from jqanywhere.runtime.state import get_session
 
@@ -38,7 +35,15 @@ def run_daily(func, time: str, reference_security: str = "") -> None:
     get_session().scheduler.run_daily(func, time, reference_security)
 
 
-def attribute_history(security: str, count: int, unit: str = "1d", fields=("open", "close", "high", "low", "volume", "money"), skip_paused: bool = True, df: bool = True, fq: str | None = "pre"):
+def attribute_history(
+    security: str,
+    count: int,
+    unit: str = "1d",
+    fields=("open", "close", "high", "low", "volume", "money"),
+    skip_paused: bool = True,
+    df: bool = True,
+    fq: str | None = "pre",
+):
     return get_session().data.attribute_history(security, count, unit, fields, skip_paused, df, fq)
 
 
@@ -48,7 +53,9 @@ def get_current_data():
 
 def order_target_value(security: str, value: float, style=MarketOrderStyle, side: str = "long", pindex: int = 0, close_today: bool = False):
     session = get_session()
-    order_result = session.broker.order_target_value(session.context, security, value, style=style, side=side, pindex=pindex, close_today=close_today)
+    order_result = session.broker.order_target_value(
+        session.context, security, value, style=style, side=side, pindex=pindex, close_today=close_today
+    )
     session.log.info(f"order_target_value({security}, {value}) -> {order_result}")
     return order_result
 

@@ -15,7 +15,11 @@ from jqanywhere.runtime.engine import RuntimeEngine
 
 
 def build_engine(config: AppConfig) -> RuntimeEngine:
-    state_store = DynamoDBStateStore(config.persistence.table_name, endpoint_url=os.getenv("AWS_ENDPOINT_URL")) if config.persistence.provider == "dynamodb" else MemoryStateStore()
+    state_store = (
+        DynamoDBStateStore(config.persistence.table_name, endpoint_url=os.getenv("AWS_ENDPOINT_URL"))
+        if config.persistence.provider == "dynamodb"
+        else MemoryStateStore()
+    )
     notifier = SnsNotifier(endpoint_url=os.getenv("AWS_ENDPOINT_URL")) if config.notifications.provider == "sns" else ConsoleNotifier()
     return RuntimeEngine(
         strategy_id=config.strategy.id,

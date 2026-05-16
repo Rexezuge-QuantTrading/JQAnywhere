@@ -41,9 +41,24 @@ testpaths = ["tests"]
 pythonpath = ["src"]
 
 [tool.ruff]
-line-length = 100
-target-version = "py311"
+line-length = 140
+target-version = "py313"
+src = ["src", "tests", "examples"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "lf"
+docstring-code-format = true
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP", "SIM"]
-ignore = ["E501"]
+ignore = []
+
+[tool.ruff.lint.per-file-ignores]
+"examples/*.py" = ["F403", "F405"]
+"src/jqanywhere/jqcompat/api.py" = ["F403", "F405"]
+"src/jqdata/__init__.py" = ["F401", "F403"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["jqanywhere", "jqdata"]

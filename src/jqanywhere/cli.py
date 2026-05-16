@@ -8,7 +8,6 @@ from pathlib import Path
 from jqanywhere.config import load_config
 from jqanywhere.runtime.factory import build_engine
 
-
 SUPPORTED_API = [
     "initialize(context)",
     "run_daily(func, time, reference_security='')",

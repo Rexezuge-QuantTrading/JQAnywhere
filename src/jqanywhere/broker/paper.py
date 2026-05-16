@@ -40,7 +40,6 @@ class PaperBroker(Broker):
         return self.order_target_value(context, security, amount * price, **kwargs)
 
     def order(self, context: Context, security: str, amount: int, **kwargs) -> Order | None:
-        price = float(kwargs.get("price") or 1.0)
         current = context.portfolio.positions.get(security)
         current_amount = current.total_amount if current else 0
         return self.order_target(context, security, current_amount + amount, **kwargs)
