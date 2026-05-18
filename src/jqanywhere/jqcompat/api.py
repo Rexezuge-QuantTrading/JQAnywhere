@@ -35,6 +35,14 @@ def run_daily(func, time: str, reference_security: str = "") -> None:
     get_session().scheduler.run_daily(func, time, reference_security)
 
 
+def run_weekly(*args, **kwargs):
+    unsupported("run_weekly")
+
+
+def run_monthly(*args, **kwargs):
+    unsupported("run_monthly")
+
+
 def attribute_history(
     security: str,
     count: int,
@@ -100,7 +108,19 @@ def get_all_trade_days(*args, **kwargs):
 
 
 def unsupported(name: str):
-    raise NotImplementedError(f"JQAnywhere v0.3 does not support {name}")
+    raise NotImplementedError(f"JQAnywhere v0.4 does not support {name}")
+
+
+def handle_data(*args, **kwargs):
+    unsupported("handle_data")
+
+
+def before_trading_start(*args, **kwargs):
+    unsupported("before_trading_start")
+
+
+def after_trading_end(*args, **kwargs):
+    unsupported("after_trading_end")
 
 
 def get_fundamentals(*args, **kwargs):
@@ -116,10 +136,40 @@ class _UnsupportedTable:
         unsupported(f"fundamentals field {name}")
 
 
+class _UnsupportedNamespace:
+    def __init__(self, name: str):
+        self.name = name
+
+    def run_query(self, *args, **kwargs):
+        unsupported(f"{self.name}.run_query")
+
+    def __getattr__(self, name):
+        unsupported(f"{self.name}.{name}")
+
+
 valuation = _UnsupportedTable()
 balance = _UnsupportedTable()
 cash_flow = _UnsupportedTable()
 income = _UnsupportedTable()
 indicator = _UnsupportedTable()
+finance = _UnsupportedNamespace("finance")
+macro = _UnsupportedNamespace("macro")
+
+
+def get_factor_values(*args, **kwargs):
+    unsupported("factor APIs")
+
+
+def get_factors(*args, **kwargs):
+    unsupported("factor APIs")
+
+
+def get_all_factors(*args, **kwargs):
+    unsupported("factor APIs")
+
+
+def portfolio_optimizer(*args, **kwargs):
+    unsupported("portfolio optimizer")
+
 
 __all__ = [name for name in globals() if not name.startswith("_")]

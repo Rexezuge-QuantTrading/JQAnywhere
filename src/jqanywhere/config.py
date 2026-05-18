@@ -7,6 +7,12 @@ import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
+DATA_PROVIDERS = {"empty", "adata"}
+BROKER_PROVIDERS = {"paper"}
+PERSISTENCE_PROVIDERS = {"memory", "dynamodb"}
+NOTIFICATION_PROVIDERS = {"console", "sns"}
+RUNTIME_MODES = {"paper"}
+
 
 @dataclass(frozen=True)
 class StrategyConfig:
@@ -72,7 +78,7 @@ def load_config(path: str | Path | None = None) -> AppConfig:
     persistence_data = data.get("persistence", {})
     notification_data = data.get("notifications", {})
 
-    return AppConfig(
+    config = AppConfig(
         strategy=StrategyConfig(id=strategy_id, path=Path(strategy_path)),
         runtime=RuntimeConfig(
             timezone=os.getenv("JQANYWHERE_TIMEZONE", runtime_data.get("timezone", "Asia/Shanghai")),
@@ -94,6 +100,26 @@ def load_config(path: str | Path | None = None) -> AppConfig:
             provider=os.getenv("JQANYWHERE_NOTIFIER", notification_data.get("provider", "console")),
         ),
     )
+    validate_config(config)
+    return config
+
+
+def validate_config(config: AppConfig) -> None:
+    errors = []
+    _validate_choice(errors, "runtime.mode", config.runtime.mode, RUNTIME_MODES)
+    _validate_choice(errors, "data.provider", config.data.provider, DATA_PROVIDERS)
+    _validate_choice(errors, "broker.provider", config.broker.provider, BROKER_PROVIDERS)
+    _validate_choice(errors, "persistence.provider", config.persistence.provider, PERSISTENCE_PROVIDERS)
+    _validate_choice(errors, "notifications.provider", config.notifications.provider, NOTIFICATION_PROVIDERS)
+    if config.broker.initial_cash < 0:
+        errors.append("broker.initial_cash must be non-negative")
+    if errors:
+        raise ValueError("Invalid JQAnywhere config: " + "; ".join(errors))
+
+
+def _validate_choice(errors: list[str], name: str, value: str, allowed: set[str]) -> None:
+    if value not in allowed:
+        errors.append(f"{name} must be one of {', '.join(sorted(allowed))}; got {value!r}")
 
 
 def _bool_env(name: str, default: bool) -> bool:

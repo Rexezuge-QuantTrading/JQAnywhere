@@ -3,7 +3,7 @@ JQAnywhere
 
 JQAnywhere is an MIT-licensed Python framework for running JoinQuant-style strategies on AWS-compatible infrastructure. The goal is to let users copy a supported JoinQuant strategy file unchanged, keep `from jqdata import *`, and run it locally, on AWS, or on LocalStack.
 
-Status: v0.3 alpha.
+Status: v0.4 alpha.
 
 Quick Start
 -----------
@@ -49,7 +49,7 @@ Internally, JQAnywhere separates runtime concerns:
 - `jqanywhere.persistence`: state stores such as memory and DynamoDB
 - `jqanywhere.notifications`: console and SNS notifications
 
-Supported In v0.3
+Supported In v0.4
 -----------------
 
 - `initialize(context)`
@@ -76,6 +76,10 @@ Supported In v0.3
 - `order_target_value`
 - paper portfolio accounting
 - persisted paper portfolio cash and positions
+- duplicate scheduled-run skipping for repeated EventBridge timestamps
+- structured run results with `completed`, `skipped`, and `failed` statuses
+- failure notifications through configured notifiers
+- strict provider validation for config and environment overrides
 - in-memory state store
 - DynamoDB state store
 - console notifications
@@ -84,12 +88,14 @@ Supported In v0.3
 - EventBridge event-time handling
 - Serverless deployment template
 - deterministic local invocation through `jqanywhere run --now ...`
+- machine-readable CLI output through `jqanywhere run --json ...`
+- config validation through `jqanywhere config validate --config ...`
 - LocalStack endpoint support through `AWS_ENDPOINT_URL`
 
 AData Provider
 --------------
 
-Set `[data].provider = "adata"` or `JQANYWHERE_DATA_PROVIDER=adata` to use AData-backed China market data. The v0.3 adapter maps JoinQuant-style APIs to the real `adata 2.9.x` SDK surface:
+Set `[data].provider = "adata"` or `JQANYWHERE_DATA_PROVIDER=adata` to use AData-backed China market data. The v0.4 adapter maps JoinQuant-style APIs to the real `adata 2.9.x` SDK surface:
 
 - stocks: daily prices, current quotes, code metadata, and latest-day minute data where AData exposes it
 - ETFs: daily prices, latest-day minute data, current quotes, and ETF metadata
@@ -103,7 +109,7 @@ Known AData-backed limits:
 - JoinQuant fundamentals/query DSL is not implemented from AData finance data because AData only exposes selected core financial indicators
 - `fq="pre"` is the safest stock adjustment mode; other adjustment modes depend on upstream AData behavior
 
-Unsupported In v0.3
+Unsupported In v0.4
 -------------------
 
 These APIs are deliberately unsupported and should raise explicit `NotImplementedError` errors instead of silently doing the wrong thing:
@@ -118,9 +124,19 @@ These APIs are deliberately unsupported and should raise explicit `NotImplemente
 - `macro.run_query`
 - factor APIs
 - portfolio optimizer
+- `run_weekly`
+- `run_monthly`
 - margin trading
 - futures
 - built-in live broker integration
+
+Operational Notes
+-----------------
+
+- `jqanywhere run --json` writes the run result as JSON on stdout; console notifications are written to stderr.
+- Repeated scheduled invocations at the same normalized event minute are skipped after a successful run, preventing duplicate order execution for at-least-once EventBridge delivery.
+- Runtime failures return `status="failed"` and send a failure notification containing the strategy id, event time, and exception summary.
+- Unknown providers such as `[data].provider = "bad"` fail during config loading instead of silently falling back to defaults.
 
 Broker Integration
 ------------------
@@ -146,6 +162,8 @@ The repository includes `serverless.yml` with:
 
 - Lambda handler: `jqanywhere.runtime.lambda_handler.run`
 - EventBridge schedule
+- reserved Lambda concurrency defaulting to `1` to reduce overlapping scheduled runs
+- CloudWatch log retention through `LOG_RETENTION_DAYS`
 - DynamoDB state table
 - SNS topic
 - LocalStack plugin configuration
@@ -156,7 +174,10 @@ Useful environment variables:
 - `JQANYWHERE_STRATEGY_PATH`
 - `JQANYWHERE_STRATEGY_ID`
 - `JQANYWHERE_TIMEZONE`
+- `JQANYWHERE_MODE`
 - `JQANYWHERE_DATA_PROVIDER`
+- `JQANYWHERE_DATA_STRICT_CURRENT_DATE`
+- `JQANYWHERE_BROKER`
 - `JQANYWHERE_INITIAL_CASH`
 - `JQANYWHERE_PERSISTENCE`
 - `JQANYWHERE_STATE_TABLE`

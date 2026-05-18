@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "jqanywhere"
-version = "0.3.0"
+version = "0.4.0"
 description = "Run JoinQuant-style Python strategies on AWS-compatible infrastructure."
 readme = "README.md"
 requires-python = ">=3.11"

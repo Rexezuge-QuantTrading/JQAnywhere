@@ -9,6 +9,7 @@ provider:
   architecture: '${env:LAMBDA_ARCHITECTURE, "arm64"}'
   region: '${env:AWS_REGION, "ap-northeast-1"}'
   versionFunctions: false
+  logRetentionInDays: '${env:LOG_RETENTION_DAYS, 14}'
   environment:
     PYTHONPATH: /var/task/src
     JQANYWHERE_CONFIG: '${env:JQANYWHERE_CONFIG, "jqanywhere.toml"}'
@@ -38,6 +39,7 @@ functions:
   runner:
     handler: jqanywhere.runtime.lambda_handler.run
     timeout: 900
+    reservedConcurrency: '${env:LAMBDA_RESERVED_CONCURRENCY, 1}'
     events:
       - schedule: cron(50 1 * * ? *)
 

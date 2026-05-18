@@ -16,17 +16,30 @@ from jqanywhere.runtime.engine import RuntimeEngine
 
 
 def build_engine(config: AppConfig) -> RuntimeEngine:
-    data = (
-        ADataMarketDataProvider(strict_current_date=config.data.strict_current_date)
-        if config.data.provider == "adata"
-        else EmptyMarketDataProvider()
-    )
-    state_store = (
-        DynamoDBStateStore(config.persistence.table_name, endpoint_url=os.getenv("AWS_ENDPOINT_URL"))
-        if config.persistence.provider == "dynamodb"
-        else MemoryStateStore()
-    )
-    notifier = SnsNotifier(endpoint_url=os.getenv("AWS_ENDPOINT_URL")) if config.notifications.provider == "sns" else ConsoleNotifier()
+    if config.data.provider == "adata":
+        data = ADataMarketDataProvider(strict_current_date=config.data.strict_current_date)
+    elif config.data.provider == "empty":
+        data = EmptyMarketDataProvider()
+    else:
+        raise ValueError(f"Unsupported data.provider: {config.data.provider}")
+
+    if config.persistence.provider == "dynamodb":
+        state_store = DynamoDBStateStore(config.persistence.table_name, endpoint_url=os.getenv("AWS_ENDPOINT_URL"))
+    elif config.persistence.provider == "memory":
+        state_store = MemoryStateStore()
+    else:
+        raise ValueError(f"Unsupported persistence.provider: {config.persistence.provider}")
+
+    if config.notifications.provider == "sns":
+        notifier = SnsNotifier(endpoint_url=os.getenv("AWS_ENDPOINT_URL"))
+    elif config.notifications.provider == "console":
+        notifier = ConsoleNotifier()
+    else:
+        raise ValueError(f"Unsupported notifications.provider: {config.notifications.provider}")
+
+    if config.broker.provider != "paper":
+        raise ValueError(f"Unsupported broker.provider: {config.broker.provider}")
+
     return RuntimeEngine(
         strategy_id=config.strategy.id,
         strategy_path=config.strategy.path,
