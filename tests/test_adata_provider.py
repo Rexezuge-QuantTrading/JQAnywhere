@@ -26,14 +26,39 @@ def _stock_history():
 
 
 def _install_adata(monkeypatch, *, stock_market=None, fund_market=None, stock_info=None):
+    cookie_module = types.SimpleNamespace(ths_cookie=lambda js_path="ths.js": "")
+    utils_module = types.SimpleNamespace(cookie=cookie_module)
+    headers_module = types.SimpleNamespace(text_headers={"Cookie": "foo=bar; v=static-token; baz=qux"})
+    common_module = types.SimpleNamespace(utils=utils_module, headers=types.SimpleNamespace(ths_headers=headers_module))
     monkeypatch.setitem(
         sys.modules,
         "adata",
         types.SimpleNamespace(
+            common=common_module,
             stock=types.SimpleNamespace(market=stock_market or types.SimpleNamespace(), info=stock_info or types.SimpleNamespace()),
             fund=types.SimpleNamespace(market=fund_market or types.SimpleNamespace()),
         ),
     )
+    monkeypatch.setitem(sys.modules, "adata.common", common_module)
+    monkeypatch.setitem(sys.modules, "adata.common.utils", utils_module)
+    monkeypatch.setitem(sys.modules, "adata.common.utils.cookie", cookie_module)
+    monkeypatch.setitem(sys.modules, "adata.common.headers", types.SimpleNamespace(ths_headers=headers_module))
+    monkeypatch.setitem(sys.modules, "adata.common.headers.ths_headers", headers_module)
+    return cookie_module
+
+
+def test_adata_patches_static_ths_cookie_when_mini_racer_is_unavailable(monkeypatch):
+    cookie_module = _install_adata(monkeypatch)
+
+    class BrokenMiniRacer:
+        def __init__(self):
+            raise RuntimeError("Native library not available")
+
+    monkeypatch.setitem(sys.modules, "py_mini_racer", types.SimpleNamespace(MiniRacer=BrokenMiniRacer))
+
+    ADataMarketDataProvider()
+
+    assert cookie_module.ths_cookie() == "v=static-token;"
 
 
 def test_adata_attribute_history_maps_etf_fields(monkeypatch):
