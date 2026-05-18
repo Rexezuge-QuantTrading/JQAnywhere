@@ -7,11 +7,11 @@ import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
-DATA_PROVIDERS = {"empty", "adata"}
-BROKER_PROVIDERS = {"paper"}
+DATA_PROVIDERS = {"empty", "adata", "remote_miniqmt"}
+BROKER_PROVIDERS = {"paper", "remote_miniqmt"}
 PERSISTENCE_PROVIDERS = {"memory", "dynamodb"}
 NOTIFICATION_PROVIDERS = {"console", "sns"}
-RUNTIME_MODES = {"paper"}
+RUNTIME_MODES = {"paper", "live"}
 
 
 @dataclass(frozen=True)
@@ -30,12 +30,22 @@ class RuntimeConfig:
 class DataConfig:
     provider: str = "empty"
     strict_current_date: bool = False
+    endpoint: str | None = None
+    token_env: str = "MINIQMT_AGENT_TOKEN"
+    timeout_seconds: float = 10.0
 
 
 @dataclass(frozen=True)
 class BrokerConfig:
     provider: str = "paper"
     initial_cash: float = 100_000.0
+    endpoint: str | None = None
+    token_env: str = "MINIQMT_AGENT_TOKEN"
+    timeout_seconds: float = 10.0
+    account_id: str | None = None
+    account_type: str = "STOCK"
+    strategy_name: str = "jqanywhere"
+    enable_trading: bool = False
 
 
 @dataclass(frozen=True)
@@ -77,6 +87,7 @@ def load_config(path: str | Path | None = None) -> AppConfig:
     broker_data = data.get("broker", {})
     persistence_data = data.get("persistence", {})
     notification_data = data.get("notifications", {})
+    miniqmt_endpoint = os.getenv("JQANYWHERE_MINIQMT_ENDPOINT")
 
     config = AppConfig(
         strategy=StrategyConfig(id=strategy_id, path=Path(strategy_path)),
@@ -87,10 +98,20 @@ def load_config(path: str | Path | None = None) -> AppConfig:
         data=DataConfig(
             provider=os.getenv("JQANYWHERE_DATA_PROVIDER", market_data.get("provider", "empty")),
             strict_current_date=_bool_env("JQANYWHERE_DATA_STRICT_CURRENT_DATE", market_data.get("strict_current_date", False)),
+            endpoint=os.getenv("JQANYWHERE_DATA_ENDPOINT", miniqmt_endpoint or market_data.get("endpoint")),
+            token_env=os.getenv("JQANYWHERE_DATA_TOKEN_ENV", market_data.get("token_env", "MINIQMT_AGENT_TOKEN")),
+            timeout_seconds=float(os.getenv("JQANYWHERE_DATA_TIMEOUT_SECONDS", market_data.get("timeout_seconds", 10.0))),
         ),
         broker=BrokerConfig(
             provider=os.getenv("JQANYWHERE_BROKER", broker_data.get("provider", "paper")),
             initial_cash=float(os.getenv("JQANYWHERE_INITIAL_CASH", broker_data.get("initial_cash", 100_000.0))),
+            endpoint=os.getenv("JQANYWHERE_BROKER_ENDPOINT", miniqmt_endpoint or broker_data.get("endpoint")),
+            token_env=os.getenv("JQANYWHERE_BROKER_TOKEN_ENV", broker_data.get("token_env", "MINIQMT_AGENT_TOKEN")),
+            timeout_seconds=float(os.getenv("JQANYWHERE_BROKER_TIMEOUT_SECONDS", broker_data.get("timeout_seconds", 10.0))),
+            account_id=os.getenv("JQANYWHERE_MINIQMT_ACCOUNT_ID", broker_data.get("account_id")),
+            account_type=os.getenv("JQANYWHERE_MINIQMT_ACCOUNT_TYPE", broker_data.get("account_type", "STOCK")),
+            strategy_name=os.getenv("JQANYWHERE_MINIQMT_STRATEGY_NAME", broker_data.get("strategy_name", "jqanywhere")),
+            enable_trading=_bool_env("JQANYWHERE_ENABLE_LIVE_TRADING", broker_data.get("enable_trading", False)),
         ),
         persistence=PersistenceConfig(
             provider=os.getenv("JQANYWHERE_PERSISTENCE", persistence_data.get("provider", "memory")),
@@ -113,6 +134,15 @@ def validate_config(config: AppConfig) -> None:
     _validate_choice(errors, "notifications.provider", config.notifications.provider, NOTIFICATION_PROVIDERS)
     if config.broker.initial_cash < 0:
         errors.append("broker.initial_cash must be non-negative")
+    if config.data.provider == "remote_miniqmt" and not config.data.endpoint:
+        errors.append("data.endpoint is required when data.provider is 'remote_miniqmt'")
+    if config.broker.provider == "remote_miniqmt":
+        if config.runtime.mode != "live":
+            errors.append("runtime.mode must be 'live' when broker.provider is 'remote_miniqmt'")
+        if not config.broker.endpoint:
+            errors.append("broker.endpoint is required when broker.provider is 'remote_miniqmt'")
+        if not config.broker.account_id:
+            errors.append("broker.account_id is required when broker.provider is 'remote_miniqmt'")
     if errors:
         raise ValueError("Invalid JQAnywhere config: " + "; ".join(errors))
 

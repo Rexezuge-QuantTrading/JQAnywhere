@@ -56,6 +56,7 @@ class RuntimeEngine:
                 self.state_store.load(self.strategy_id), self.initial_cash
             )
             context = Context(portfolio=portfolio, current_dt=now, previous_date=self._previous_date(now), order_history=order_history)
+            self.broker.sync_portfolio(context)
             scheduler = Scheduler()
             session = RuntimeSession(self.strategy_id, context, g, log, scheduler, self.data, self.broker)
             token = bind_session(session)
