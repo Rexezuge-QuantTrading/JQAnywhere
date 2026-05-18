@@ -101,6 +101,86 @@ jobs:
       - name: Run Example Strategy
         run: jqanywhere run --config examples/jqanywhere.toml --now 2026-05-18T09:50:00+08:00 --json
 
+  serverless-floci-smoke:
+    name: Serverless Floci Smoke
+    runs-on: ubuntu-latest
+
+    env:
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      AWS_DEFAULT_REGION: ap-northeast-1
+      AWS_REGION: ap-northeast-1
+      AWS_ENDPOINT_URL: http://localhost:4566
+      JQANYWHERE_AWS_ENDPOINT_URL: http://localhost.floci.io:4566
+      JQANYWHERE_DATA_PROVIDER: empty
+      JQANYWHERE_DATA_STRICT_CURRENT_DATE: "false"
+      LAMBDA_RUNTIME: python3.13
+      LAMBDA_ARCHITECTURE: x86_64
+      SERVERLESS_LICENSE_KEY: ${{ secrets.SERVERLESS_LICENSE_KEY }}
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set Up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Set Up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install Python Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+          python -m pip install awscli
+
+      - name: Install Serverless Dependencies
+        run: npm ci
+
+      - name: Start Floci
+        run: |
+          docker run -d --name floci \
+            -p 4566:4566 \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            -e FLOCI_DEFAULT_REGION=ap-northeast-1 \
+            -e FLOCI_STORAGE_MODE=memory \
+            -u root \
+            floci/floci:latest
+
+          for attempt in {1..60}; do
+            if curl --fail --silent http://localhost:4566/_localstack/health >/dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+
+          docker logs floci
+          exit 1
+
+      - name: Deploy Serverless Stack To Floci
+        run: npx serverless deploy --stage local
+
+      - name: Verify Deployed Resources
+        run: |
+          aws --endpoint-url http://localhost:4566 lambda list-functions
+          aws --endpoint-url http://localhost:4566 dynamodb describe-table --table-name jqanywhere-state
+          aws --endpoint-url http://localhost:4566 sns list-topics
+
+      - name: Invoke Deployed Runner
+        run: |
+          npx serverless invoke --stage local --function runner --data '{"time":"2026-05-18T01:50:00Z"}' | tee invoke-output.json
+          grep -E 'completed|skipped' invoke-output.json
+
+      - name: Show Floci Logs On Failure
+        if: failure()
+        run: docker logs floci
+
   package:
     name: Build Package
     runs-on: ubuntu-latest

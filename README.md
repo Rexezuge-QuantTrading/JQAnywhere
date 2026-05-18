@@ -218,8 +218,10 @@ The repository includes `serverless.yml` with:
 - CloudWatch log retention through `LOG_RETENTION_DAYS`
 - DynamoDB state table
 - SNS topic
-- LocalStack plugin configuration
+- Floci-compatible local AWS emulator deployment through the `serverless-localstack` endpoint plugin
 - package exclusions for `.venv`, `tests`, and `private` by default
+
+GitHub Actions runs a Serverless smoke test against [Floci](https://github.com/floci-io/floci): it starts `floci/floci`, deploys the stack with Serverless Framework v4, verifies the Lambda/DynamoDB/SNS resources, and invokes the deployed `runner` Lambda. The workflow expects `SERVERLESS_LICENSE_KEY` to be configured as a GitHub secret for Serverless v4. `JQANYWHERE_AWS_ENDPOINT_URL` can override the `AWS_ENDPOINT_URL` injected into Lambda while host-side tools still use `AWS_ENDPOINT_URL`.
 
 Useful environment variables:
 
@@ -247,6 +249,7 @@ Useful environment variables:
 - `JQANYWHERE_STATE_TABLE`
 - `JQANYWHERE_NOTIFIER`
 - `AWS_ENDPOINT_URL`
+- `JQANYWHERE_AWS_ENDPOINT_URL` (Serverless-only Lambda endpoint override)
 - `JQANYWHERE_EVENTBRIDGE_SCHEDULE`
 
 License
