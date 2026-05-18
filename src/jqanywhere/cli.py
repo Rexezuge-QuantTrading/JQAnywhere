@@ -13,6 +13,9 @@ from jqanywhere.runtime.factory import build_engine
 SUPPORTED_API = [
     "initialize(context)",
     "run_daily(func, time, reference_security='')",
+    "run_weekly(func, weekday, time, reference_security='')",
+    "run_monthly(func, monthday, time, reference_security='')",
+    "before_trading_start(context), after_trading_end(context)",
     "g, context, log",
     "set_option, set_benchmark, set_slippage, set_order_cost, set_commission",
     "attribute_history, get_current_data, get_price, get_index_stocks",
@@ -22,16 +25,12 @@ SUPPORTED_API = [
 
 UNSUPPORTED_API = [
     "handle_data",
-    "before_trading_start",
-    "after_trading_end",
     "get_fundamentals",
     "query, valuation, balance, cash_flow, income, indicator",
     "finance.run_query",
     "macro.run_query",
     "factor APIs",
     "portfolio optimizer",
-    "run_weekly",
-    "run_monthly",
     "futures and margin trading",
 ]
 
@@ -51,7 +50,7 @@ def main(argv: list[str] | None = None) -> None:
     invoke_parser.add_argument("--now", default=None, help="Invocation time as an ISO-8601 datetime")
     invoke_parser.add_argument("--json", action="store_true", help="Print machine-readable JSON")
 
-    list_api_parser = subparsers.add_parser("list-api", help="List v0.4 API surface")
+    list_api_parser = subparsers.add_parser("list-api", help="List v0.5 API surface")
     list_api_parser.add_argument("--json", action="store_true", help="Print machine-readable JSON")
 
     config_parser = subparsers.add_parser("config", help="Configuration helpers")

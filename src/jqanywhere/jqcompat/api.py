@@ -35,12 +35,12 @@ def run_daily(func, time: str, reference_security: str = "") -> None:
     get_session().scheduler.run_daily(func, time, reference_security)
 
 
-def run_weekly(*args, **kwargs):
-    unsupported("run_weekly")
+def run_weekly(func, weekday: int, time: str, reference_security: str = "") -> None:
+    get_session().scheduler.run_weekly(func, weekday, time, reference_security)
 
 
-def run_monthly(*args, **kwargs):
-    unsupported("run_monthly")
+def run_monthly(func, monthday: int, time: str, reference_security: str = "") -> None:
+    get_session().scheduler.run_monthly(func, monthday, time, reference_security)
 
 
 def attribute_history(
@@ -70,17 +70,27 @@ def order_target_value(security: str, value: float, style=MarketOrderStyle, side
 
 def order_target(security: str, amount: int, style=MarketOrderStyle, side: str = "long", pindex: int = 0, close_today: bool = False):
     session = get_session()
-    return session.broker.order_target(session.context, security, amount, style=style, side=side, pindex=pindex, close_today=close_today)
+    order_result = session.broker.order_target(
+        session.context, security, amount, style=style, side=side, pindex=pindex, close_today=close_today
+    )
+    session.log.info(f"order_target({security}, {amount}) -> {order_result}")
+    return order_result
 
 
 def order(security: str, amount: int, style=MarketOrderStyle, side: str = "long", pindex: int = 0, close_today: bool = False):
     session = get_session()
-    return session.broker.order(session.context, security, amount, style=style, side=side, pindex=pindex, close_today=close_today)
+    order_result = session.broker.order(session.context, security, amount, style=style, side=side, pindex=pindex, close_today=close_today)
+    session.log.info(f"order({security}, {amount}) -> {order_result}")
+    return order_result
 
 
 def order_value(security: str, value: float, style=MarketOrderStyle, side: str = "long", pindex: int = 0, close_today: bool = False):
     session = get_session()
-    return session.broker.order_value(session.context, security, value, style=style, side=side, pindex=pindex, close_today=close_today)
+    order_result = session.broker.order_value(
+        session.context, security, value, style=style, side=side, pindex=pindex, close_today=close_today
+    )
+    session.log.info(f"order_value({security}, {value}) -> {order_result}")
+    return order_result
 
 
 def get_price(*args, **kwargs):
@@ -108,7 +118,7 @@ def get_all_trade_days(*args, **kwargs):
 
 
 def unsupported(name: str):
-    raise NotImplementedError(f"JQAnywhere v0.4 does not support {name}")
+    raise NotImplementedError(f"JQAnywhere v0.5 does not support {name}")
 
 
 def handle_data(*args, **kwargs):

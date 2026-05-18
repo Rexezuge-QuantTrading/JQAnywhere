@@ -1,6 +1,7 @@
 service: jqanywhere
 
 plugins:
+  - serverless-python-requirements
   - serverless-localstack
 
 provider:
@@ -14,6 +15,11 @@ provider:
     PYTHONPATH: /var/task/src
     JQANYWHERE_CONFIG: '${env:JQANYWHERE_CONFIG, "jqanywhere.toml"}'
     JQANYWHERE_STRATEGY_PATH: '${env:JQANYWHERE_STRATEGY_PATH, "examples/simple_daily_allocation.py"}'
+    JQANYWHERE_STRATEGY_ID: '${env:JQANYWHERE_STRATEGY_ID, "simple_daily_allocation"}'
+    JQANYWHERE_TIMEZONE: '${env:JQANYWHERE_TIMEZONE, "Asia/Shanghai"}'
+    JQANYWHERE_DATA_PROVIDER: '${env:JQANYWHERE_DATA_PROVIDER, "adata"}'
+    JQANYWHERE_DATA_STRICT_CURRENT_DATE: '${env:JQANYWHERE_DATA_STRICT_CURRENT_DATE, "false"}'
+    JQANYWHERE_BROKER: paper
     JQANYWHERE_PERSISTENCE: dynamodb
     JQANYWHERE_STATE_TABLE: '${self:service}-state'
     JQANYWHERE_NOTIFIER: sns
@@ -41,7 +47,7 @@ functions:
     timeout: 900
     reservedConcurrency: '${env:LAMBDA_RESERVED_CONCURRENCY, 1}'
     events:
-      - schedule: cron(50 1 * * ? *)
+      - schedule: '${env:JQANYWHERE_EVENTBRIDGE_SCHEDULE, "cron(50 1 * * ? *)"}'
 
 resources:
   Resources:
@@ -65,12 +71,18 @@ package:
   patterns:
     - src/**
     - examples/**
-    - private/**
     - jqanywhere.toml
     - '!tests/**'
     - '!.venv/**'
+    - '!private/**'
 
 custom:
+  pythonRequirements:
+    dockerizePip: true
+    slim: true
+    strip: false
+    useDownloadCache: true
+    useStaticCache: true
   localstack:
     stages:
       - local

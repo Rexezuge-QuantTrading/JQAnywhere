@@ -72,6 +72,7 @@ class Context:
     portfolio: Portfolio
     current_dt: datetime
     previous_date: Any = None
+    order_history: list[Any] = field(default_factory=list)
 
 
 @dataclass
@@ -104,3 +105,8 @@ class Order:
     value: float
     price: float
     filled: bool = True
+    status: str = "filled"
+    filled_amount: int | None = None
+    commission: float = 0.0
+    reason: str | None = None
+    add_time: datetime | None = None

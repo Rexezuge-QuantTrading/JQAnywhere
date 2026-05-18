@@ -3,7 +3,7 @@ JQAnywhere
 
 JQAnywhere is an MIT-licensed Python framework for running JoinQuant-style strategies on AWS-compatible infrastructure. The goal is to let users copy a supported JoinQuant strategy file unchanged, keep `from jqdata import *`, and run it locally, on AWS, or on LocalStack.
 
-Status: v0.4 alpha.
+Status: v0.5 alpha.
 
 Quick Start
 -----------
@@ -49,11 +49,14 @@ Internally, JQAnywhere separates runtime concerns:
 - `jqanywhere.persistence`: state stores such as memory and DynamoDB
 - `jqanywhere.notifications`: console and SNS notifications
 
-Supported In v0.4
+Supported In v0.5
 -----------------
 
 - `initialize(context)`
 - time-aware `run_daily(func, "HH:MM", reference_security="")`
+- calendar-aware `run_weekly(func, weekday, "HH:MM", reference_security="")`
+- calendar-aware `run_monthly(func, monthday, "HH:MM", reference_security="")`
+- optional `before_trading_start(context)` and `after_trading_end(context)` lifecycle hooks around due jobs
 - `g`, `context`, `log`
 - `context.current_dt`
 - `context.previous_date` when the selected data provider exposes a trade calendar
@@ -74,9 +77,11 @@ Supported In v0.4
 - `order_target`
 - `order_value`
 - `order_target_value`
-- paper portfolio accounting
+- paper portfolio accounting with market-data-based fills, fixed slippage, configured commission/order cost, rejection reasons, and order history
 - persisted paper portfolio cash and positions
+- persisted order history and failed-run metadata
 - duplicate scheduled-run skipping for repeated EventBridge timestamps
+- scheduled-run claiming for state stores, including DynamoDB conditional claims to reduce concurrent duplicate execution risk
 - structured run results with `completed`, `skipped`, and `failed` statuses
 - failure notifications through configured notifiers
 - strict provider validation for config and environment overrides
@@ -95,7 +100,7 @@ Supported In v0.4
 AData Provider
 --------------
 
-Set `[data].provider = "adata"` or `JQANYWHERE_DATA_PROVIDER=adata` to use AData-backed China market data. The v0.4 adapter maps JoinQuant-style APIs to the real `adata 2.9.x` SDK surface:
+Set `[data].provider = "adata"` or `JQANYWHERE_DATA_PROVIDER=adata` to use AData-backed China market data. The v0.5 adapter maps JoinQuant-style APIs to the real `adata 2.9.x` SDK surface:
 
 - stocks: daily prices, current quotes, code metadata, and latest-day minute data where AData exposes it
 - ETFs: daily prices, latest-day minute data, current quotes, and ETF metadata
@@ -109,23 +114,20 @@ Known AData-backed limits:
 - JoinQuant fundamentals/query DSL is not implemented from AData finance data because AData only exposes selected core financial indicators
 - `fq="pre"` is the safest stock adjustment mode; other adjustment modes depend on upstream AData behavior
 
-Unsupported In v0.4
+Unsupported In v0.5
 -------------------
 
 These APIs are deliberately unsupported and should raise explicit `NotImplementedError` errors instead of silently doing the wrong thing:
 
 - `handle_data`
 - tick/minute event loop
-- `before_trading_start`
-- `after_trading_end`
+- JoinQuant schedule aliases such as `open`, `close`, `before_open`, `after_close`, and `every_bar`
 - fundamentals/query DSL: `query`, `valuation`, `balance`, `cash_flow`, `income`, `indicator`
 - `get_fundamentals`
 - `finance.run_query`
 - `macro.run_query`
 - factor APIs
 - portfolio optimizer
-- `run_weekly`
-- `run_monthly`
 - margin trading
 - futures
 - built-in live broker integration
@@ -136,7 +138,9 @@ Operational Notes
 - `jqanywhere run --json` writes the run result as JSON on stdout; console notifications are written to stderr.
 - Repeated scheduled invocations at the same normalized event minute are skipped after a successful run, preventing duplicate order execution for at-least-once EventBridge delivery.
 - Runtime failures return `status="failed"` and send a failure notification containing the strategy id, event time, and exception summary.
+- Runtime failures persist `last_status="failed"`, `last_failed_at`, and `last_error`; failed scheduled runs are retryable because they do not advance `last_run_key`.
 - Unknown providers such as `[data].provider = "bad"` fail during config loading instead of silently falling back to defaults.
+- Paper trading is still a deterministic approximation. Market orders use current data or recent close when available, apply configured fixed slippage and cost settings, and reject paused or limit-blocked securities, but it is not a live broker simulator.
 
 Broker Integration
 ------------------
@@ -162,11 +166,13 @@ The repository includes `serverless.yml` with:
 
 - Lambda handler: `jqanywhere.runtime.lambda_handler.run`
 - EventBridge schedule
+- `serverless-python-requirements` packaging for pandas, numpy, adata, and other Python dependencies
 - reserved Lambda concurrency defaulting to `1` to reduce overlapping scheduled runs
 - CloudWatch log retention through `LOG_RETENTION_DAYS`
 - DynamoDB state table
 - SNS topic
 - LocalStack plugin configuration
+- package exclusions for `.venv`, `tests`, and `private` by default
 
 Useful environment variables:
 
@@ -183,6 +189,7 @@ Useful environment variables:
 - `JQANYWHERE_STATE_TABLE`
 - `JQANYWHERE_NOTIFIER`
 - `AWS_ENDPOINT_URL`
+- `JQANYWHERE_EVENTBRIDGE_SCHEDULE`
 
 License
 -------
