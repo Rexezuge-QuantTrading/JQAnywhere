@@ -100,7 +100,7 @@ class MarketDataProvider(ABC):
         a DataFrame indexed by ``datetime`` with securities as columns; modern pandas
         users should prefer ``panel=False`` for equivalent DataFrame output.
         """
-        raise NotImplementedError("JQAnywhere v0.4 does not implement get_price for this data provider")
+        raise NotImplementedError("JQAnywhere v0.5 does not implement get_price for this data provider")
 
     def get_index_stocks(self, index_symbol: str, date=None) -> list[str]:
         """Return tradable constituent security codes for an index on a date.
@@ -111,23 +111,23 @@ class MarketDataProvider(ABC):
         In backtests, JoinQuant's default date is ``context.current_dt``; in research,
         the default is today. The return value is a list of stock codes.
         """
-        raise NotImplementedError("JQAnywhere v0.4 does not implement get_index_stocks for this data provider")
+        raise NotImplementedError("JQAnywhere v0.5 does not implement get_index_stocks for this data provider")
 
     def get_all_securities(self, types=None, date=None):
         """Return security metadata as a JoinQuant-style DataFrame indexed by code."""
-        raise NotImplementedError("JQAnywhere v0.4 does not implement get_all_securities for this data provider")
+        raise NotImplementedError("JQAnywhere v0.5 does not implement get_all_securities for this data provider")
 
     def get_security_info(self, code: str) -> SecurityInfo:
         """Return one security's JoinQuant-style metadata object."""
-        raise NotImplementedError("JQAnywhere v0.4 does not implement get_security_info for this data provider")
+        raise NotImplementedError("JQAnywhere v0.5 does not implement get_security_info for this data provider")
 
     def get_trade_days(self, start_date=None, end_date=None, count=None) -> list[date]:
         """Return trading days between dates, or the last ``count`` days up to ``end_date``."""
-        raise NotImplementedError("JQAnywhere v0.4 does not implement get_trade_days for this data provider")
+        raise NotImplementedError("JQAnywhere v0.5 does not implement get_trade_days for this data provider")
 
     def get_all_trade_days(self) -> list[date]:
         """Return all trading days known by this data provider."""
-        raise NotImplementedError("JQAnywhere v0.4 does not implement get_all_trade_days for this data provider")
+        raise NotImplementedError("JQAnywhere v0.5 does not implement get_all_trade_days for this data provider")
 
 
 class EmptyMarketDataProvider(MarketDataProvider):

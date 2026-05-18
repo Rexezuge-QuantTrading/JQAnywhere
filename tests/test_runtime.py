@@ -3,6 +3,7 @@ from pathlib import Path
 
 from jqanywhere.broker.paper import PaperBroker
 from jqanywhere.data.base import EmptyMarketDataProvider, StaticMarketDataProvider
+from jqanywhere.jqcompat.types import CurrentData
 from jqanywhere.notifications.console import ConsoleNotifier
 from jqanywhere.persistence.memory import MemoryStateStore
 from jqanywhere.runtime.engine import RuntimeEngine
@@ -33,7 +34,7 @@ def test_unsupported_fundamentals_is_explicit():
     try:
         get_fundamentals(None)
     except NotImplementedError as exc:
-        assert "v0.4" in str(exc)
+        assert "v0.5" in str(exc)
     else:
         raise AssertionError("get_fundamentals should be unsupported")
 
@@ -139,6 +140,142 @@ def test_runtime_skips_duplicate_scheduled_event(tmp_path):
     assert duplicate["state"]["count"] == 1
     assert duplicate["portfolio"]["available_cash"] == 99_990
     assert next_day["state"]["count"] == 2
+
+
+def test_run_weekly_and_monthly_use_trade_calendar(tmp_path):
+    strategy_path = tmp_path / "calendar_scheduled_strategy.py"
+    strategy_path.write_text(
+        "from jqdata import *\n"
+        "\n"
+        "def initialize(context):\n"
+        "    g.weekly = getattr(g, 'weekly', 0)\n"
+        "    g.monthly = getattr(g, 'monthly', 0)\n"
+        "    run_weekly(weekly, 1, '09:50')\n"
+        "    run_monthly(monthly, -1, '09:50')\n"
+        "\n"
+        "def weekly(context):\n"
+        "    g.weekly += 1\n"
+        "\n"
+        "def monthly(context):\n"
+        "    g.monthly += 1\n",
+        encoding="utf-8",
+    )
+    engine = RuntimeEngine(
+        strategy_id="calendar_scheduled",
+        strategy_path=strategy_path,
+        data=StaticMarketDataProvider(trade_days=["2026-05-18", "2026-05-19", "2026-05-25", "2026-05-29"]),
+        broker=PaperBroker(),
+        state_store=MemoryStateStore(),
+        notifier=ConsoleNotifier(),
+        initial_cash=100_000,
+    )
+
+    weekly = engine.run(now=datetime(2026, 5, 18, 9, 50))
+    monthly = engine.run(now=datetime(2026, 5, 29, 9, 50))
+
+    assert weekly["state"] == {"weekly": 1, "monthly": 0}
+    assert monthly["state"] == {"weekly": 1, "monthly": 1}
+
+
+def test_lifecycle_hooks_run_around_due_jobs(tmp_path):
+    strategy_path = tmp_path / "lifecycle_strategy.py"
+    strategy_path.write_text(
+        "from jqdata import *\n"
+        "\n"
+        "def initialize(context):\n"
+        "    g.events = getattr(g, 'events', [])\n"
+        "    run_daily(trade, '09:50')\n"
+        "\n"
+        "def before_trading_start(context):\n"
+        "    g.events.append('before')\n"
+        "\n"
+        "def trade(context):\n"
+        "    g.events.append('trade')\n"
+        "\n"
+        "def after_trading_end(context):\n"
+        "    g.events.append('after')\n",
+        encoding="utf-8",
+    )
+    engine = RuntimeEngine(
+        strategy_id="lifecycle",
+        strategy_path=strategy_path,
+        data=EmptyMarketDataProvider(),
+        broker=PaperBroker(),
+        state_store=MemoryStateStore(),
+        notifier=ConsoleNotifier(),
+        initial_cash=100_000,
+    )
+
+    result = engine.run(now=datetime(2026, 5, 18, 9, 50))
+
+    assert result["state"]["events"] == ["before", "trade", "after"]
+    assert result["due_jobs"] == ["before_trading_start", "trade", "after_trading_end"]
+
+
+def test_paper_broker_uses_market_price_costs_and_persists_order_history(tmp_path):
+    strategy_path = tmp_path / "priced_strategy.py"
+    strategy_path.write_text(
+        "from jqdata import *\n"
+        "\n"
+        "def initialize(context):\n"
+        "    set_slippage(FixedSlippage(0.5))\n"
+        "    set_order_cost(OrderCost(open_commission=0.001, close_commission=0.001, min_commission=1))\n"
+        "    run_daily(trade, '09:50')\n"
+        "\n"
+        "def trade(context):\n"
+        "    order_target_value('000001.XSHE', 105)\n",
+        encoding="utf-8",
+    )
+    data = StaticMarketDataProvider(current=["000001.XSHE"])
+    data.current["000001.XSHE"] = CurrentData("000001.XSHE", last_price=10.0)
+    engine = RuntimeEngine(
+        strategy_id="priced",
+        strategy_path=strategy_path,
+        data=data,
+        broker=PaperBroker(),
+        state_store=MemoryStateStore(),
+        notifier=ConsoleNotifier(),
+        initial_cash=1_000,
+    )
+
+    result = engine.run(now=datetime(2026, 5, 18, 9, 50))
+
+    assert result["orders"][0]["price"] == 10.5
+    assert result["orders"][0]["commission"] == 1
+    assert result["portfolio"]["available_cash"] == 894
+    assert result["portfolio"]["positions"]["000001.XSHE"]["total_amount"] == 10
+
+
+def test_failed_run_persists_failure_metadata_without_duplicate_completion(tmp_path):
+    strategy_path = tmp_path / "failing_persistent_strategy.py"
+    strategy_path.write_text(
+        "from jqdata import *\n"
+        "\n"
+        "def initialize(context):\n"
+        "    run_daily(trade, '09:50')\n"
+        "\n"
+        "def trade(context):\n"
+        "    raise RuntimeError('boom')\n",
+        encoding="utf-8",
+    )
+    store = MemoryStateStore()
+    engine = RuntimeEngine(
+        strategy_id="failing_persistent",
+        strategy_path=strategy_path,
+        data=EmptyMarketDataProvider(),
+        broker=PaperBroker(),
+        state_store=store,
+        notifier=ConsoleNotifier(),
+        initial_cash=100_000,
+    )
+
+    first = engine.run(now=datetime(2026, 5, 18, 9, 50))
+    retry = engine.run(now=datetime(2026, 5, 18, 9, 50))
+
+    assert first["status"] == "failed"
+    assert first["metadata"]["last_status"] == "failed"
+    assert first["metadata"]["last_error"] == {"type": "RuntimeError", "message": "boom"}
+    assert retry["status"] == "failed"
 
 
 def test_runtime_returns_failed_status_and_notifies(tmp_path):
