@@ -9,8 +9,16 @@ Quick Start
 -----------
 
 ```bash
-pip install -e ".[dev]"
-jqanywhere run --config examples/jqanywhere.toml --now 2026-05-18T09:50:00+08:00
+python3 -m venv .venv
+.venv/bin/python -m pip install -e ".[dev]"
+.venv/bin/jqanywhere run --config examples/jqanywhere.toml --now 2026-05-18T09:50:00+08:00
+```
+
+The CLI can also validate config and print the supported compatibility surface:
+
+```bash
+.venv/bin/jqanywhere config validate --config examples/jqanywhere.toml
+.venv/bin/jqanywhere list-api
 ```
 
 The example is intentionally small and public:
@@ -44,8 +52,8 @@ Internally, JQAnywhere separates runtime concerns:
 
 - `jqdata`: compatibility package imported by copied JoinQuant strategies
 - `jqanywhere.runtime`: strategy loading, runtime session, scheduling, Lambda handler
-- `jqanywhere.data`: market data provider interface
-- `jqanywhere.broker`: swappable broker interface, paper broker, live broker template
+- `jqanywhere.data`: market data provider interface, empty provider, AData adapter, remote MiniQMT adapter
+- `jqanywhere.broker`: swappable broker interface, paper broker, remote MiniQMT broker, live broker template
 - `jqanywhere.persistence`: state stores such as memory and DynamoDB
 - `jqanywhere.notifications`: console and SNS notifications
 
@@ -94,7 +102,9 @@ Supported In v0.5
 - Serverless deployment template
 - deterministic local invocation through `jqanywhere run --now ...`
 - machine-readable CLI output through `jqanywhere run --json ...`
+- direct one-off strategy invocation through `jqanywhere invoke --strategy ...`
 - config validation through `jqanywhere config validate --config ...`
+- API surface inspection through `jqanywhere list-api`
 - LocalStack endpoint support through `AWS_ENDPOINT_URL`
 
 AData Provider
@@ -137,7 +147,7 @@ Remote MiniQMT Agent
 
 JQAnywhere can talk to a separately deployed MiniQMT HTTP agent through `remote_miniqmt` providers. The MiniQMT client and `xtquant` runtime stay outside this repository; JQAnywhere only sees an HTTPS JSON API.
 
-Minimal live config:
+Minimal read-only live config:
 
 ```toml
 [runtime]
@@ -152,8 +162,10 @@ provider = "remote_miniqmt"
 endpoint = "https://miniqmt-agent.local:8443"
 account_id = "1000000365"
 account_type = "STOCK"
-enable_trading = true
+enable_trading = false
 ```
+
+Set `enable_trading = true` only after validating the external agent, account mapping, network security, and idempotent order handling. `JQANYWHERE_MINIQMT_ENDPOINT` can provide one endpoint for both data and broker providers; `JQANYWHERE_DATA_ENDPOINT` and `JQANYWHERE_BROKER_ENDPOINT` override them independently when needed.
 
 Security notes:
 
@@ -166,7 +178,9 @@ Operational Notes
 -----------------
 
 - `jqanywhere run --json` writes the run result as JSON on stdout; console notifications are written to stderr.
+- `jqanywhere invoke --strategy path/to/file.py` runs a strategy file once while still loading provider, broker, persistence, and notification settings from config/env.
 - Repeated scheduled invocations at the same normalized event minute are skipped after a successful run, preventing duplicate order execution for at-least-once EventBridge delivery.
+- Scheduled runs first claim the normalized event minute in the configured state store; DynamoDB uses a conditional claim to reduce duplicate execution under concurrent delivery.
 - Runtime failures return `status="failed"` and send a failure notification containing the strategy id, event time, and exception summary.
 - Runtime failures persist `last_status="failed"`, `last_failed_at`, and `last_error`; failed scheduled runs are retryable because they do not advance `last_run_key`.
 - Unknown providers such as `[data].provider = "bad"` fail during config loading instead of silently falling back to defaults.
@@ -175,7 +189,7 @@ Operational Notes
 Broker Integration
 ------------------
 
-Live trading is designed as a template model. Strategies call JoinQuant-style functions, while users swap the broker implementation:
+Live trading is designed as a remote-agent/template model. Strategies call JoinQuant-style functions, while users either configure `remote_miniqmt` or swap the broker implementation:
 
 ```python
 from jqanywhere.broker.base import Broker
@@ -216,10 +230,12 @@ Useful environment variables:
 - `JQANYWHERE_MINIQMT_ENDPOINT`
 - `JQANYWHERE_DATA_ENDPOINT`
 - `JQANYWHERE_DATA_TOKEN_ENV`
+- `JQANYWHERE_DATA_TIMEOUT_SECONDS`
 - `JQANYWHERE_BROKER`
 - `JQANYWHERE_INITIAL_CASH`
 - `JQANYWHERE_BROKER_ENDPOINT`
 - `JQANYWHERE_BROKER_TOKEN_ENV`
+- `JQANYWHERE_BROKER_TIMEOUT_SECONDS`
 - `JQANYWHERE_MINIQMT_ACCOUNT_ID`
 - `JQANYWHERE_MINIQMT_ACCOUNT_TYPE`
 - `JQANYWHERE_MINIQMT_STRATEGY_NAME`
