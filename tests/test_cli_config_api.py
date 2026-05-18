@@ -82,5 +82,18 @@ def test_cli_run_json_outputs_valid_json(tmp_path, capsys):
 
 def test_documented_unsupported_surfaces_are_explicit():
     for func in (handle_data, before_trading_start, finance.run_query, macro.run_query):
-        with pytest.raises(NotImplementedError, match="v0.5"):
+        with pytest.raises(NotImplementedError, match="v0.6"):
             func(None)
+
+
+def test_cli_doctor_json_reports_configured_providers(tmp_path, capsys):
+    config_path = tmp_path / "jqanywhere.toml"
+    strategy_path = tmp_path / "strategy.py"
+    strategy_path.write_text("def initialize(context):\n    pass\n", encoding="utf-8")
+    config_path.write_text(f'[strategy]\nid = "doctor"\npath = "{strategy_path}"\n', encoding="utf-8")
+
+    main(["doctor", "--config", str(config_path), "--json"])
+
+    result = json.loads(capsys.readouterr().out)
+    assert result["status"] == "ok"
+    assert {check["name"] for check in result["checks"]} >= {"config", "strategy_path", "data_provider", "broker_provider"}

@@ -3,7 +3,7 @@ JQAnywhere
 
 JQAnywhere is an MIT-licensed Python framework for running JoinQuant-style strategies on AWS-compatible infrastructure. The goal is to let users copy a supported JoinQuant strategy file unchanged, keep `from jqdata import *`, and run it locally, on AWS, or on LocalStack.
 
-Status: v0.5 alpha.
+Status: v0.6 alpha.
 
 Quick Start
 -----------
@@ -57,11 +57,12 @@ Internally, JQAnywhere separates runtime concerns:
 - `jqanywhere.persistence`: state stores such as memory and DynamoDB
 - `jqanywhere.notifications`: console and SNS notifications
 
-Supported In v0.5
+Supported In v0.6
 -----------------
 
 - `initialize(context)`
 - time-aware `run_daily(func, "HH:MM", reference_security="")`
+- deterministic `run_daily` schedule aliases: `before_open`, `open`, `close`, and `after_close`
 - calendar-aware `run_weekly(func, weekday, "HH:MM", reference_security="")`
 - calendar-aware `run_monthly(func, monthday, "HH:MM", reference_security="")`
 - optional `before_trading_start(context)` and `after_trading_end(context)` lifecycle hooks around due jobs
@@ -104,13 +105,14 @@ Supported In v0.5
 - machine-readable CLI output through `jqanywhere run --json ...`
 - direct one-off strategy invocation through `jqanywhere invoke --strategy ...`
 - config validation through `jqanywhere config validate --config ...`
+- operational config/provider checks through `jqanywhere doctor --config ...`
 - API surface inspection through `jqanywhere list-api`
 - LocalStack endpoint support through `AWS_ENDPOINT_URL`
 
 AData Provider
 --------------
 
-Set `[data].provider = "adata"` or `JQANYWHERE_DATA_PROVIDER=adata` to use AData-backed China market data. The v0.5 adapter maps JoinQuant-style APIs to the real `adata 2.9.x` SDK surface:
+Set `[data].provider = "adata"` or `JQANYWHERE_DATA_PROVIDER=adata` to use AData-backed China market data. The v0.6 adapter maps JoinQuant-style APIs to the real `adata 2.9.x` SDK surface:
 
 - stocks: daily prices, current quotes, code metadata, and latest-day minute data where AData exposes it
 - ETFs: daily prices, latest-day minute data, current quotes, and ETF metadata
@@ -124,14 +126,14 @@ Known AData-backed limits:
 - JoinQuant fundamentals/query DSL is not implemented from AData finance data because AData only exposes selected core financial indicators
 - `fq="pre"` is the safest stock adjustment mode; other adjustment modes depend on upstream AData behavior
 
-Unsupported In v0.5
+Unsupported In v0.6
 -------------------
 
 These APIs are deliberately unsupported and should raise explicit `NotImplementedError` errors instead of silently doing the wrong thing:
 
 - `handle_data`
 - tick/minute event loop
-- JoinQuant schedule aliases such as `open`, `close`, `before_open`, `after_close`, and `every_bar`
+- tick/minute event-loop schedule alias `every_bar`
 - fundamentals/query DSL: `query`, `valuation`, `balance`, `cash_flow`, `income`, `indicator`
 - `get_fundamentals`
 - `finance.run_query`
@@ -185,6 +187,7 @@ Operational Notes
 - Runtime failures persist `last_status="failed"`, `last_failed_at`, and `last_error`; failed scheduled runs are retryable because they do not advance `last_run_key`.
 - Unknown providers such as `[data].provider = "bad"` fail during config loading instead of silently falling back to defaults.
 - Paper trading is still a deterministic approximation. Market orders use current data or recent close when available, apply configured fixed slippage and cost settings, and reject paused or limit-blocked securities, but it is not a live broker simulator.
+- Paper portfolios mark persisted positions to available current or recent prices before each run so local account value reflects price movement between scheduled invocations.
 
 Broker Integration
 ------------------

@@ -8,6 +8,13 @@ from jqanywhere.runtime.state import get_session
 
 
 class PaperBroker(Broker):
+    def sync_portfolio(self, context: Context) -> None:
+        for security, position in list(context.portfolio.positions.items()):
+            price = _order_price(context, security, {})
+            if price > 0:
+                position.price = price
+                position.value = position.total_amount * price
+
     def order_target_value(self, context: Context, security: str, value: float, **kwargs) -> Order | None:
         side = kwargs.get("side", "long")
         if side != "long":
@@ -102,6 +109,11 @@ class PaperBroker(Broker):
     def order(self, context: Context, security: str, amount: int, **kwargs) -> Order | None:
         current = context.portfolio.positions.get(security)
         current_amount = current.total_amount if current else 0
+        if amount < 0 and (current is None or current.closeable_amount <= 0):
+            price = _order_price(context, security, kwargs)
+            order = _rejected_order(context, security, amount, 0.0, price, "insufficient_position")
+            _record_order(context, order)
+            return order
         return self.order_target(context, security, current_amount + amount, **kwargs)
 
 

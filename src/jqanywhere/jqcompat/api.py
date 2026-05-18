@@ -118,7 +118,7 @@ def get_all_trade_days(*args, **kwargs):
 
 
 def unsupported(name: str):
-    raise NotImplementedError(f"JQAnywhere v0.5 does not support {name}")
+    raise NotImplementedError(f"JQAnywhere v0.6 does not support {name}")
 
 
 def handle_data(*args, **kwargs):
