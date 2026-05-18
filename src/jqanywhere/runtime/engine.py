@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -44,36 +45,85 @@ class RuntimeEngine:
 
     def run(self, now: datetime | None = None) -> dict:
         now = self._normalize_now(now)
+        started_at = time.monotonic()
         log = BufferedLogger()
         g = G()
-        persisted_g, portfolio, has_persisted_g = _decode_runtime_state(self.state_store.load(self.strategy_id), self.initial_cash)
-        context = Context(portfolio=portfolio, current_dt=now, previous_date=self._previous_date(now))
-        scheduler = Scheduler()
-        session = RuntimeSession(self.strategy_id, context, g, log, scheduler, self.data, self.broker)
-        token = bind_session(session)
+        context = None
+        token = None
+        due_job_names = []
         try:
+            persisted_g, portfolio, has_persisted_g, metadata = _decode_runtime_state(
+                self.state_store.load(self.strategy_id), self.initial_cash
+            )
+            context = Context(portfolio=portfolio, current_dt=now, previous_date=self._previous_date(now))
+            scheduler = Scheduler()
+            session = RuntimeSession(self.strategy_id, context, g, log, scheduler, self.data, self.broker)
+            token = bind_session(session)
             module = load_strategy(self.strategy_path)
             if not hasattr(module, "initialize"):
                 raise AttributeError("Strategy must define initialize(context)")
             module.initialize(context)
             if has_persisted_g:
                 g.load_dict(persisted_g)
-            for job in scheduler.due_jobs(now):
+            due_jobs = scheduler.due_jobs(now)
+            run_key = _run_key(now)
+            due_job_names = [_job_name(job.func) for job in due_jobs]
+            if due_jobs and metadata.get("last_run_key") == run_key:
+                log.info(f"Skipping duplicate scheduled run for {run_key}")
+                logs = log.flush_text()
+                result = _runtime_result(
+                    "skipped",
+                    self.strategy_id,
+                    now,
+                    g.to_dict(),
+                    context.portfolio,
+                    logs,
+                    due_job_names,
+                    started_at,
+                    metadata=metadata,
+                    reason="duplicate_scheduled_run",
+                )
+                self._notify_result(result, logs)
+                return result
+
+            for job in due_jobs:
                 job.func(context)
             state = g.to_dict()
-            self.state_store.save(self.strategy_id, _encode_runtime_state(state, context.portfolio))
+            metadata = _next_metadata(metadata, now, run_key, due_job_names, "completed")
+            self.state_store.save(self.strategy_id, _encode_runtime_state(state, context.portfolio, metadata))
             logs = log.flush_text()
-            self.notifier.send(f"JQAnywhere {self.strategy_id}", logs)
-            return {
-                "status": "completed",
-                "strategy_id": self.strategy_id,
-                "logs": logs,
-                "state": state,
-                "portfolio": _portfolio_to_dict(context.portfolio),
-                "portfolio_value": context.portfolio.total_value,
-            }
+            result = _runtime_result(
+                "completed", self.strategy_id, now, state, context.portfolio, logs, due_job_names, started_at, metadata=metadata
+            )
+            self._notify_result(result, logs)
+            return result
+        except Exception as exc:
+            logs = log.flush_text()
+            portfolio = context.portfolio if context is not None else None
+            result = _runtime_result(
+                "failed",
+                self.strategy_id,
+                now,
+                g.to_dict(),
+                portfolio,
+                logs,
+                due_job_names,
+                started_at,
+                error={"type": type(exc).__name__, "message": str(exc)},
+            )
+            self._notify_result(result, logs)
+            return result
         finally:
-            reset_session(token)
+            if token is not None:
+                reset_session(token)
+
+    def _notify_result(self, result: dict[str, Any], logs: str) -> None:
+        subject = f"JQAnywhere {result['strategy_id']} {result['status']}"
+        message = _notification_message(result, logs)
+        try:
+            self.notifier.send(subject, message)
+        except Exception as exc:  # pragma: no cover - notifier failures depend on external services.
+            result["notification_error"] = {"type": type(exc).__name__, "message": str(exc)}
 
     def _normalize_now(self, now: datetime | None) -> datetime:
         timezone = ZoneInfo(self.timezone)
@@ -91,14 +141,89 @@ class RuntimeEngine:
         return trade_days[-1] if trade_days else None
 
 
-def _decode_runtime_state(raw_state: dict[str, Any], initial_cash: float) -> tuple[dict[str, Any], Portfolio, bool]:
+def _decode_runtime_state(raw_state: dict[str, Any], initial_cash: float) -> tuple[dict[str, Any], Portfolio, bool, dict[str, Any]]:
     if raw_state.get(_STATE_VERSION_KEY) == _STATE_VERSION:
-        return dict(raw_state.get("g", {})), _portfolio_from_dict(raw_state.get("portfolio"), initial_cash), True
-    return dict(raw_state), Portfolio(initial_cash, initial_cash), bool(raw_state)
+        return (
+            dict(raw_state.get("g", {})),
+            _portfolio_from_dict(raw_state.get("portfolio"), initial_cash),
+            True,
+            dict(raw_state.get("metadata", {})),
+        )
+    return dict(raw_state), Portfolio(initial_cash, initial_cash), bool(raw_state), {}
 
 
-def _encode_runtime_state(g_state: dict[str, Any], portfolio: Portfolio) -> dict[str, Any]:
-    return {_STATE_VERSION_KEY: _STATE_VERSION, "g": g_state, "portfolio": _portfolio_to_dict(portfolio)}
+def _encode_runtime_state(g_state: dict[str, Any], portfolio: Portfolio, metadata: dict[str, Any] | None = None) -> dict[str, Any]:
+    return {_STATE_VERSION_KEY: _STATE_VERSION, "g": g_state, "portfolio": _portfolio_to_dict(portfolio), "metadata": metadata or {}}
+
+
+def _runtime_result(
+    status: str,
+    strategy_id: str,
+    now: datetime,
+    state: dict[str, Any],
+    portfolio: Portfolio | None,
+    logs: str,
+    due_jobs: list[str],
+    started_at: float,
+    *,
+    metadata: dict[str, Any] | None = None,
+    reason: str | None = None,
+    error: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    result = {
+        "status": status,
+        "strategy_id": strategy_id,
+        "event_time": now.isoformat(),
+        "due_jobs": due_jobs,
+        "duration_seconds": round(time.monotonic() - started_at, 6),
+        "logs": logs,
+        "state": state,
+        "portfolio": _portfolio_to_dict(portfolio) if portfolio is not None else None,
+        "portfolio_value": portfolio.total_value if portfolio is not None else None,
+        "metadata": metadata or {},
+    }
+    if reason is not None:
+        result["reason"] = reason
+    if error is not None:
+        result["error"] = error
+    return result
+
+
+def _notification_message(result: dict[str, Any], logs: str) -> str:
+    lines = [
+        f"status: {result['status']}",
+        f"strategy_id: {result['strategy_id']}",
+        f"event_time: {result['event_time']}",
+        f"due_jobs: {', '.join(result['due_jobs']) if result['due_jobs'] else '-'}",
+        f"portfolio_value: {result['portfolio_value']}",
+    ]
+    if "reason" in result:
+        lines.append(f"reason: {result['reason']}")
+    if "error" in result:
+        lines.append(f"error: {result['error']['type']}: {result['error']['message']}")
+    if logs:
+        lines.extend(["", logs])
+    return "\n".join(lines)
+
+
+def _next_metadata(metadata: dict[str, Any], now: datetime, run_key: str, due_jobs: list[str], status: str) -> dict[str, Any]:
+    next_metadata = dict(metadata)
+    next_metadata["revision"] = int(next_metadata.get("revision", 0)) + 1
+    next_metadata["updated_at"] = now.isoformat()
+    next_metadata["last_status"] = status
+    next_metadata["last_due_jobs"] = due_jobs
+    if due_jobs:
+        next_metadata["last_run_key"] = run_key
+        next_metadata["last_run_at"] = now.isoformat()
+    return next_metadata
+
+
+def _run_key(now: datetime) -> str:
+    return now.replace(second=0, microsecond=0).isoformat()
+
+
+def _job_name(func) -> str:
+    return getattr(func, "__name__", repr(func))
 
 
 def _portfolio_to_dict(portfolio: Portfolio) -> dict[str, Any]:

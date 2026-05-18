@@ -33,7 +33,7 @@ def test_unsupported_fundamentals_is_explicit():
     try:
         get_fundamentals(None)
     except NotImplementedError as exc:
-        assert "v0.3" in str(exc)
+        assert "v0.4" in str(exc)
     else:
         raise AssertionError("get_fundamentals should be unsupported")
 
@@ -102,6 +102,82 @@ def test_runtime_persists_g_and_portfolio_across_runs(tmp_path):
     assert first["portfolio"]["available_cash"] == 99_990
     assert second["portfolio"]["available_cash"] == 99_980
     assert second["portfolio"]["positions"]["000001.XSHE"]["value"] == 20
+
+
+def test_runtime_skips_duplicate_scheduled_event(tmp_path):
+    strategy_path = tmp_path / "duplicate_strategy.py"
+    strategy_path.write_text(
+        "from jqdata import *\n"
+        "\n"
+        "def initialize(context):\n"
+        "    g.count = 0\n"
+        "    run_daily(trade, '09:50')\n"
+        "\n"
+        "def trade(context):\n"
+        "    g.count += 1\n"
+        "    order_value('000001.XSHE', 10)\n",
+        encoding="utf-8",
+    )
+    store = MemoryStateStore()
+    engine = RuntimeEngine(
+        strategy_id="duplicate",
+        strategy_path=strategy_path,
+        data=EmptyMarketDataProvider(),
+        broker=PaperBroker(),
+        state_store=store,
+        notifier=ConsoleNotifier(),
+        initial_cash=100_000,
+    )
+
+    first = engine.run(now=datetime(2026, 5, 18, 9, 50))
+    duplicate = engine.run(now=datetime(2026, 5, 18, 9, 50))
+    next_day = engine.run(now=datetime(2026, 5, 19, 9, 50))
+
+    assert first["status"] == "completed"
+    assert duplicate["status"] == "skipped"
+    assert duplicate["reason"] == "duplicate_scheduled_run"
+    assert duplicate["state"]["count"] == 1
+    assert duplicate["portfolio"]["available_cash"] == 99_990
+    assert next_day["state"]["count"] == 2
+
+
+def test_runtime_returns_failed_status_and_notifies(tmp_path):
+    class CaptureNotifier:
+        def __init__(self):
+            self.messages = []
+
+        def send(self, subject, message):
+            self.messages.append((subject, message))
+
+    strategy_path = tmp_path / "failing_strategy.py"
+    strategy_path.write_text(
+        "from jqdata import *\n"
+        "\n"
+        "def initialize(context):\n"
+        "    run_daily(trade, '09:50')\n"
+        "\n"
+        "def trade(context):\n"
+        "    raise RuntimeError('boom')\n",
+        encoding="utf-8",
+    )
+    notifier = CaptureNotifier()
+    engine = RuntimeEngine(
+        strategy_id="failing",
+        strategy_path=strategy_path,
+        data=EmptyMarketDataProvider(),
+        broker=PaperBroker(),
+        state_store=MemoryStateStore(),
+        notifier=notifier,
+        initial_cash=100_000,
+    )
+
+    result = engine.run(now=datetime(2026, 5, 18, 9, 50))
+
+    assert result["status"] == "failed"
+    assert result["error"] == {"type": "RuntimeError", "message": "boom"}
+    assert notifier.messages
+    assert "failed" in notifier.messages[0][0]
+    assert "RuntimeError: boom" in notifier.messages[0][1]
 
 
 def test_context_previous_date_uses_trade_calendar(tmp_path):

@@ -32,7 +32,7 @@ class Scheduler:
 def _parse_time(value: str) -> tuple[int, int]:
     match = _TIME_PATTERN.match(value)
     if not match:
-        raise NotImplementedError("JQAnywhere v0.3 run_daily only supports HH:MM schedule times")
+        raise NotImplementedError("JQAnywhere v0.4 run_daily only supports HH:MM schedule times")
     hour = int(match.group("hour"))
     minute = int(match.group("minute"))
     if hour > 23 or minute > 59:
