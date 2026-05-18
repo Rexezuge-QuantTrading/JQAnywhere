@@ -34,9 +34,43 @@ def test_unsupported_fundamentals_is_explicit():
     try:
         get_fundamentals(None)
     except NotImplementedError as exc:
-        assert "v0.5" in str(exc)
+        assert "v0.6" in str(exc)
     else:
         raise AssertionError("get_fundamentals should be unsupported")
+
+
+def test_run_daily_accepts_safe_schedule_aliases(tmp_path):
+    strategy_path = tmp_path / "alias_strategy.py"
+    strategy_path.write_text(
+        "from jqdata import *\n"
+        "\n"
+        "def initialize(context):\n"
+        "    g.events = getattr(g, 'events', [])\n"
+        "    run_daily(open_trade, 'open')\n"
+        "    run_daily(close_trade, 'close')\n"
+        "\n"
+        "def open_trade(context):\n"
+        "    g.events.append('open')\n"
+        "\n"
+        "def close_trade(context):\n"
+        "    g.events.append('close')\n",
+        encoding="utf-8",
+    )
+    engine = RuntimeEngine(
+        strategy_id="alias",
+        strategy_path=strategy_path,
+        data=EmptyMarketDataProvider(),
+        broker=PaperBroker(),
+        state_store=MemoryStateStore(),
+        notifier=ConsoleNotifier(),
+        initial_cash=100_000,
+    )
+
+    morning = engine.run(now=datetime(2026, 5, 18, 9, 30))
+    close = engine.run(now=datetime(2026, 5, 18, 15, 0))
+
+    assert morning["state"]["events"] == ["open"]
+    assert close["state"]["events"] == ["open", "close"]
 
 
 def test_run_daily_only_runs_matching_time(tmp_path):
@@ -244,6 +278,84 @@ def test_paper_broker_uses_market_price_costs_and_persists_order_history(tmp_pat
     assert result["orders"][0]["commission"] == 1
     assert result["portfolio"]["available_cash"] == 894
     assert result["portfolio"]["positions"]["000001.XSHE"]["total_amount"] == 10
+
+
+def test_paper_broker_marks_positions_to_current_price_across_runs(tmp_path):
+    strategy_path = tmp_path / "mark_to_market_strategy.py"
+    strategy_path.write_text(
+        "from jqdata import *\n"
+        "\n"
+        "def initialize(context):\n"
+        "    g.count = getattr(g, 'count', 0)\n"
+        "    run_daily(trade, '09:50')\n"
+        "\n"
+        "def trade(context):\n"
+        "    if g.count == 0:\n"
+        "        order_target_value('000001.XSHE', 100)\n"
+        "    else:\n"
+        "        g.value = context.portfolio.total_value\n"
+        "    g.count += 1\n",
+        encoding="utf-8",
+    )
+    data = StaticMarketDataProvider(current=["000001.XSHE"])
+    data.current["000001.XSHE"].last_price = 10.0
+    engine = RuntimeEngine(
+        strategy_id="mark_to_market",
+        strategy_path=strategy_path,
+        data=data,
+        broker=PaperBroker(),
+        state_store=MemoryStateStore(),
+        notifier=ConsoleNotifier(),
+        initial_cash=1_000,
+    )
+
+    first = engine.run(now=datetime(2026, 5, 18, 9, 50))
+    data.current["000001.XSHE"].last_price = 20.0
+    second = engine.run(now=datetime(2026, 5, 19, 9, 50))
+
+    assert first["portfolio_value"] == 1_000
+    assert second["state"]["value"] == 1_100
+    assert second["portfolio"]["positions"]["000001.XSHE"]["value"] == 200
+
+
+def test_paper_broker_rejects_unavailable_sell(tmp_path):
+    strategy_path = tmp_path / "sell_rejection_strategy.py"
+    strategy_path.write_text(
+        "from jqdata import *\n"
+        "\n"
+        "def initialize(context):\n"
+        "    run_daily(trade, '09:50')\n"
+        "\n"
+        "def trade(context):\n"
+        "    order('000001.XSHE', -10)\n",
+        encoding="utf-8",
+    )
+    engine = RuntimeEngine(
+        strategy_id="sell_rejection",
+        strategy_path=strategy_path,
+        data=EmptyMarketDataProvider(),
+        broker=PaperBroker(),
+        state_store=MemoryStateStore(),
+        notifier=ConsoleNotifier(),
+        initial_cash=1_000,
+    )
+
+    result = engine.run(now=datetime(2026, 5, 18, 9, 50))
+
+    assert result["orders"][0]["status"] == "rejected"
+    assert result["orders"][0]["reason"] == "insufficient_position"
+
+
+def test_memory_store_recovers_older_active_run_key():
+    store = MemoryStateStore()
+    store.save("stale", {"metadata": {"revision": 1, "active_run_key": "2026-05-18T09:50:00+08:00"}})
+
+    claim = store.claim_run("stale", {"metadata": {"revision": 1}}, "2026-05-19T09:50:00+08:00")
+    duplicate = store.claim_run("stale", claim.state, "2026-05-19T09:50:00+08:00")
+
+    assert claim.claimed is True
+    assert claim.state["metadata"]["active_run_key"] == "2026-05-19T09:50:00+08:00"
+    assert duplicate.claimed is False
 
 
 def test_failed_run_persists_failure_metadata_without_duplicate_completion(tmp_path):

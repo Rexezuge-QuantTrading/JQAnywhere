@@ -5,7 +5,7 @@ from __future__ import annotations
 import copy
 from typing import Any
 
-from jqanywhere.persistence.base import RunClaim, StateStore
+from jqanywhere.persistence.base import RunClaim, StateStore, _can_claim_active_key
 
 
 class MemoryStateStore(StateStore):
@@ -21,7 +21,7 @@ class MemoryStateStore(StateStore):
     def claim_run(self, strategy_id: str, state: dict[str, Any], run_key: str) -> RunClaim:
         current = self.load(strategy_id)
         metadata = dict(current.get("metadata", {}))
-        if metadata.get("last_run_key") == run_key or metadata.get("active_run_key") == run_key:
+        if metadata.get("last_run_key") == run_key or not _can_claim_active_key(metadata.get("active_run_key"), run_key):
             return RunClaim(False, current)
         metadata["revision"] = int(metadata.get("revision", 0)) + 1
         metadata["active_run_key"] = run_key

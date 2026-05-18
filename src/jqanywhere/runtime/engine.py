@@ -56,10 +56,10 @@ class RuntimeEngine:
                 self.state_store.load(self.strategy_id), self.initial_cash
             )
             context = Context(portfolio=portfolio, current_dt=now, previous_date=self._previous_date(now), order_history=order_history)
-            self.broker.sync_portfolio(context)
             scheduler = Scheduler()
             session = RuntimeSession(self.strategy_id, context, g, log, scheduler, self.data, self.broker)
             token = bind_session(session)
+            self.broker.sync_portfolio(context)
             module = load_strategy(self.strategy_path)
             if not hasattr(module, "initialize"):
                 raise AttributeError("Strategy must define initialize(context)")

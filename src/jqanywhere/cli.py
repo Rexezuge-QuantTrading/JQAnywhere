@@ -12,7 +12,7 @@ from jqanywhere.runtime.factory import build_engine
 
 SUPPORTED_API = [
     "initialize(context)",
-    "run_daily(func, time, reference_security='')",
+    "run_daily(func, time, reference_security='') with HH:MM or before_open/open/close/after_close",
     "run_weekly(func, weekday, time, reference_security='')",
     "run_monthly(func, monthday, time, reference_security='')",
     "before_trading_start(context), after_trading_end(context)",
@@ -21,6 +21,7 @@ SUPPORTED_API = [
     "attribute_history, get_current_data, get_price, get_index_stocks",
     "get_all_securities, get_security_info, get_trade_days, get_all_trade_days",
     "order, order_target, order_value, order_target_value",
+    "jqanywhere doctor",
 ]
 
 UNSUPPORTED_API = [
@@ -31,6 +32,7 @@ UNSUPPORTED_API = [
     "macro.run_query",
     "factor APIs",
     "portfolio optimizer",
+    "every_bar and tick/minute event loops",
     "futures and margin trading",
 ]
 
@@ -50,8 +52,12 @@ def main(argv: list[str] | None = None) -> None:
     invoke_parser.add_argument("--now", default=None, help="Invocation time as an ISO-8601 datetime")
     invoke_parser.add_argument("--json", action="store_true", help="Print machine-readable JSON")
 
-    list_api_parser = subparsers.add_parser("list-api", help="List v0.5 API surface")
+    list_api_parser = subparsers.add_parser("list-api", help="List v0.6 API surface")
     list_api_parser.add_argument("--json", action="store_true", help="Print machine-readable JSON")
+
+    doctor_parser = subparsers.add_parser("doctor", help="Check config and selected providers")
+    doctor_parser.add_argument("--config", default=None)
+    doctor_parser.add_argument("--json", action="store_true", help="Print machine-readable JSON")
 
     config_parser = subparsers.add_parser("config", help="Configuration helpers")
     config_subparsers = config_parser.add_subparsers(dest="config_command", required=True)
@@ -77,6 +83,13 @@ def main(argv: list[str] | None = None) -> None:
         print(json.dumps(result, ensure_ascii=False) if args.json else "Config valid")
         return
 
+    if args.command == "doctor":
+        result = _doctor(args.config)
+        print(json.dumps(result, ensure_ascii=False) if args.json else _format_doctor(result))
+        if result["status"] != "ok":
+            raise SystemExit(1)
+        return
+
     config = load_config(args.config)
     if args.command == "invoke":
         object.__setattr__(config.strategy, "path", Path(args.strategy))
@@ -88,6 +101,29 @@ def main(argv: list[str] | None = None) -> None:
 
 def _parse_datetime(value: str) -> datetime:
     return datetime.fromisoformat(value.replace("Z", "+00:00"))
+
+
+def _doctor(config_path: str | None) -> dict:
+    checks = []
+    try:
+        config = load_config(config_path)
+    except Exception as exc:
+        return {"status": "failed", "checks": [{"name": "config", "status": "failed", "message": str(exc)}]}
+    checks.append({"name": "config", "status": "ok", "message": f"strategy={config.strategy.id}"})
+    strategy_path_status = "ok" if config.strategy.path.exists() else "failed"
+    checks.append({"name": "strategy_path", "status": strategy_path_status, "message": str(config.strategy.path)})
+    checks.append({"name": "data_provider", "status": "ok", "message": config.data.provider})
+    checks.append({"name": "broker_provider", "status": "ok", "message": config.broker.provider})
+    checks.append({"name": "persistence_provider", "status": "ok", "message": config.persistence.provider})
+    checks.append({"name": "notifier", "status": "ok", "message": config.notifications.provider})
+    status = "ok" if all(check["status"] == "ok" for check in checks) else "failed"
+    return {"status": status, "checks": checks}
+
+
+def _format_doctor(result: dict) -> str:
+    lines = [f"Doctor {result['status']}"]
+    lines.extend(f"{check['status']}: {check['name']} - {check['message']}" for check in result["checks"])
+    return "\n".join(lines)
 
 
 if __name__ == "__main__":

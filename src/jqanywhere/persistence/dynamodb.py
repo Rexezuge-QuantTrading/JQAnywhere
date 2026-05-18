@@ -5,7 +5,7 @@ from __future__ import annotations
 from decimal import Decimal
 from typing import Any
 
-from jqanywhere.persistence.base import RunClaim, StateStore
+from jqanywhere.persistence.base import RunClaim, StateStore, _can_claim_active_key
 
 
 class DynamoDBStateStore(StateStore):
@@ -25,7 +25,7 @@ class DynamoDBStateStore(StateStore):
         from botocore.exceptions import ClientError
 
         metadata = dict(state.get("metadata", {}))
-        if metadata.get("last_run_key") == run_key or metadata.get("active_run_key") == run_key:
+        if metadata.get("last_run_key") == run_key or not _can_claim_active_key(metadata.get("active_run_key"), run_key):
             return RunClaim(False, state)
         expected_revision = int(metadata.get("revision", 0))
         metadata["revision"] = expected_revision + 1

@@ -8,6 +8,12 @@ from dataclasses import dataclass, field
 from datetime import datetime
 
 _TIME_PATTERN = re.compile(r"^(?P<hour>\d{1,2}):(?P<minute>\d{2})$")
+_TIME_ALIASES = {
+    "before_open": "09:00",
+    "open": "09:30",
+    "close": "15:00",
+    "after_close": "15:30",
+}
 
 
 @dataclass(frozen=True)
@@ -76,9 +82,11 @@ def _same_period(day, today, period: str) -> bool:
 
 
 def _parse_time(value: str) -> tuple[int, int]:
+    if value in _TIME_ALIASES:
+        value = _TIME_ALIASES[value]
     match = _TIME_PATTERN.match(value)
     if not match:
-        raise NotImplementedError("JQAnywhere v0.5 scheduled jobs only support HH:MM schedule times")
+        raise NotImplementedError("JQAnywhere v0.6 scheduled jobs support HH:MM plus before_open/open/close/after_close aliases")
     hour = int(match.group("hour"))
     minute = int(match.group("minute"))
     if hour > 23 or minute > 59:

@@ -13,7 +13,7 @@
 
 - Ruff is the formatter and linter source of truth in `pyproject.toml`; no Black, isort, mypy, or pre-commit config exists currently.
 - Ruff targets `py313` with `line-length = 140`, double quotes, spaces, LF endings, and source roots `src`, `tests`, `examples`.
-- The project requires Python `>=3.11`, is packaged as version `0.5.0`, and depends on `adata`, `boto3`, `numpy`, and `pandas`.
+- The project requires Python `>=3.11`, is packaged as version `0.6.0`, and depends on `adata`, `boto3`, `numpy`, and `pandas`.
 - Keep the configured per-file Ruff ignores for JoinQuant compatibility: examples may use `from jqdata import *`, `src/jqanywhere/jqcompat/api.py` re-exports wildcard API types, and `src/jqdata/__init__.py` intentionally re-exports compatibility globals.
 
 ## Git Commit Messages
@@ -45,7 +45,7 @@
 - Main local CLI entrypoint is `jqanywhere.cli:main`; Lambda entrypoint is `jqanywhere.runtime.lambda_handler.run`.
 - Runtime construction is centralized in `src/jqanywhere/runtime/factory.py`; it selects `empty`, `adata`, or `remote_miniqmt` data, `paper` or `remote_miniqmt` broker, memory or DynamoDB state, and console or SNS notifier from config/env.
 - `RuntimeEngine.run()` loads the strategy file, requires `initialize(context)`, runs due scheduled jobs and lifecycle hooks, persists `g` plus portfolio/order metadata, sends logs, records failed-run metadata, and always resets the runtime session token.
-- Supported v0.5 compatibility includes daily/weekly/monthly scheduling, optional `before_trading_start` and `after_trading_end`, `context.current_dt`, `context.previous_date` when a trade calendar is available, market-data APIs, paper order APIs, duplicate scheduled-run skipping, and structured `completed`/`skipped`/`failed` results.
+- Supported v0.6 compatibility includes daily/weekly/monthly scheduling, safe daily schedule aliases, optional `before_trading_start` and `after_trading_end`, `context.current_dt`, `context.previous_date` when a trade calendar is available, market-data APIs, paper order APIs, duplicate scheduled-run skipping, stale active-run recovery, and structured `completed`/`skipped`/`failed` results.
 - `src/jqanywhere/data/adata_provider.py` adapts AData 2.9.x for China stocks, ETFs, indexes, convertible-bond metadata, current data, daily/history data, and trade calendars; keep upstream AData limitations explicit.
 - `src/jqanywhere/miniqmt_remote` is only an HTTPS JSON client for a separately deployed MiniQMT agent; do not add in-process `xtquant` runtime assumptions to this repo.
 
