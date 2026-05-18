@@ -8,6 +8,10 @@ from jqanywhere.jqcompat.types import Context, Order
 
 
 class Broker(ABC):
+    def sync_portfolio(self, context: Context) -> None:
+        """Refresh context portfolio from the broker before a strategy run."""
+        return None
+
     @abstractmethod
     def order_target_value(self, context: Context, security: str, value: float, **kwargs) -> Order | None:
         raise NotImplementedError

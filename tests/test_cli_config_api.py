@@ -20,6 +20,37 @@ def test_config_rejects_unknown_provider(tmp_path):
         load_config(config_path)
 
 
+def test_config_accepts_remote_miniqmt_live_provider(tmp_path):
+    config_path = tmp_path / "jqanywhere.toml"
+    strategy_path = tmp_path / "strategy.py"
+    strategy_path.write_text("def initialize(context):\n    pass\n", encoding="utf-8")
+    config_path.write_text(
+        f'''
+[strategy]
+path = "{strategy_path}"
+
+[runtime]
+mode = "live"
+
+[data]
+provider = "remote_miniqmt"
+endpoint = "http://127.0.0.1:8000"
+
+[broker]
+provider = "remote_miniqmt"
+endpoint = "http://127.0.0.1:8000"
+account_id = "1000000365"
+''',
+        encoding="utf-8",
+    )
+
+    config = load_config(config_path)
+
+    assert config.runtime.mode == "live"
+    assert config.data.provider == "remote_miniqmt"
+    assert config.broker.account_id == "1000000365"
+
+
 def test_cli_config_validate_json(tmp_path, capsys):
     config_path = tmp_path / "jqanywhere.toml"
     strategy_path = tmp_path / "strategy.py"

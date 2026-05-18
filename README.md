@@ -130,7 +130,37 @@ These APIs are deliberately unsupported and should raise explicit `NotImplemente
 - portfolio optimizer
 - margin trading
 - futures
-- built-in live broker integration
+- direct in-process `xtquant` broker integration
+
+Remote MiniQMT Agent
+--------------------
+
+JQAnywhere can talk to a separately deployed MiniQMT HTTP agent through `remote_miniqmt` providers. The MiniQMT client and `xtquant` runtime stay outside this repository; JQAnywhere only sees an HTTPS JSON API.
+
+Minimal live config:
+
+```toml
+[runtime]
+mode = "live"
+
+[data]
+provider = "remote_miniqmt"
+endpoint = "https://miniqmt-agent.local:8443"
+
+[broker]
+provider = "remote_miniqmt"
+endpoint = "https://miniqmt-agent.local:8443"
+account_id = "1000000365"
+account_type = "STOCK"
+enable_trading = true
+```
+
+Security notes:
+
+- put the agent on a private network such as Tailscale or WireGuard
+- set `MINIQMT_AGENT_TOKEN` and configure HTTPS or mTLS for non-localhost traffic
+- keep `enable_trading = false` until the agent has been validated in read-only mode
+- the agent is the live account source of truth; JQAnywhere syncs portfolio state before each scheduled run
 
 Operational Notes
 -----------------
@@ -183,8 +213,17 @@ Useful environment variables:
 - `JQANYWHERE_MODE`
 - `JQANYWHERE_DATA_PROVIDER`
 - `JQANYWHERE_DATA_STRICT_CURRENT_DATE`
+- `JQANYWHERE_MINIQMT_ENDPOINT`
+- `JQANYWHERE_DATA_ENDPOINT`
+- `JQANYWHERE_DATA_TOKEN_ENV`
 - `JQANYWHERE_BROKER`
 - `JQANYWHERE_INITIAL_CASH`
+- `JQANYWHERE_BROKER_ENDPOINT`
+- `JQANYWHERE_BROKER_TOKEN_ENV`
+- `JQANYWHERE_MINIQMT_ACCOUNT_ID`
+- `JQANYWHERE_MINIQMT_ACCOUNT_TYPE`
+- `JQANYWHERE_MINIQMT_STRATEGY_NAME`
+- `JQANYWHERE_ENABLE_LIVE_TRADING`
 - `JQANYWHERE_PERSISTENCE`
 - `JQANYWHERE_STATE_TABLE`
 - `JQANYWHERE_NOTIFIER`
