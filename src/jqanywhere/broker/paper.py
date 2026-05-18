@@ -8,7 +8,7 @@ from jqanywhere.jqcompat.types import Context, Order, Position
 
 class PaperBroker(Broker):
     def order_target_value(self, context: Context, security: str, value: float, **kwargs) -> Order | None:
-        price = float(kwargs.get("price") or 1.0)
+        price = _order_price(kwargs)
         target_value = max(float(value), 0.0)
         current = context.portfolio.positions.get(security)
         current_value = current.value if current else 0.0
@@ -36,10 +36,15 @@ class PaperBroker(Broker):
         return Order(security=security, amount=amount, value=target_value, price=price)
 
     def order_target(self, context: Context, security: str, amount: int, **kwargs) -> Order | None:
-        price = float(kwargs.get("price") or 1.0)
+        price = _order_price(kwargs)
         return self.order_target_value(context, security, amount * price, **kwargs)
 
     def order(self, context: Context, security: str, amount: int, **kwargs) -> Order | None:
         current = context.portfolio.positions.get(security)
         current_amount = current.total_amount if current else 0
         return self.order_target(context, security, current_amount + amount, **kwargs)
+
+
+def _order_price(kwargs) -> float:
+    style = kwargs.get("style")
+    return float(kwargs.get("price") or getattr(style, "price", 1.0) or 1.0)

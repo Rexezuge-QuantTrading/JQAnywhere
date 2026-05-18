@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from decimal import Decimal
 from typing import Any
 
 from jqanywhere.persistence.base import StateStore
@@ -15,7 +16,33 @@ class DynamoDBStateStore(StateStore):
 
     def load(self, strategy_id: str) -> dict[str, Any]:
         item = self.table.get_item(Key={"id": strategy_id}).get("Item")
-        return item.get("state", {}) if item else {}
+        return _from_dynamodb_value(item.get("state", {})) if item else {}
 
     def save(self, strategy_id: str, state: dict[str, Any]) -> None:
-        self.table.put_item(Item={"id": strategy_id, "state": state})
+        self.table.put_item(Item={"id": strategy_id, "state": _to_dynamodb_value(state)})
+
+
+def _to_dynamodb_value(value):
+    if isinstance(value, dict):
+        return {key: _to_dynamodb_value(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_to_dynamodb_value(item) for item in value]
+    if isinstance(value, tuple):
+        return [_to_dynamodb_value(item) for item in value]
+    if isinstance(value, bool) or value is None or isinstance(value, str):
+        return value
+    if isinstance(value, int):
+        return Decimal(value)
+    if isinstance(value, float):
+        return Decimal(str(value))
+    return value
+
+
+def _from_dynamodb_value(value):
+    if isinstance(value, dict):
+        return {key: _from_dynamodb_value(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_from_dynamodb_value(item) for item in value]
+    if isinstance(value, Decimal):
+        return int(value) if value == value.to_integral_value() else float(value)
+    return value

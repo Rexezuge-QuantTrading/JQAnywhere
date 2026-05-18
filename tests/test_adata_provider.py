@@ -319,6 +319,27 @@ def test_adata_get_security_info_returns_metadata_object(monkeypatch):
     assert result.type == "stock"
 
 
+def test_adata_get_trade_days_filters_calendar(monkeypatch):
+    stock_info = types.SimpleNamespace(
+        trade_calendar=lambda: pd.DataFrame(
+            {
+                "trade_date": ["2026-05-11", "2026-05-12", "2026-05-13", "2026-05-14", "2026-05-15"],
+                "is_open": [1, 1, 0, 1, 1],
+            }
+        )
+    )
+    _install_adata(monkeypatch, stock_info=stock_info)
+    provider = ADataMarketDataProvider()
+
+    range_result = provider.get_trade_days(start_date="2026-05-12", end_date="2026-05-15")
+    count_result = provider.get_trade_days(end_date="2026-05-15", count=2)
+    all_result = provider.get_all_trade_days()
+
+    assert [day.isoformat() for day in range_result] == ["2026-05-12", "2026-05-14", "2026-05-15"]
+    assert [day.isoformat() for day in count_result] == ["2026-05-14", "2026-05-15"]
+    assert [day.isoformat() for day in all_result] == ["2026-05-11", "2026-05-12", "2026-05-14", "2026-05-15"]
+
+
 def test_adata_etf_minute_history_uses_real_adata_endpoint(monkeypatch):
     def get_market_etf_min(**kwargs):
         return pd.DataFrame(
