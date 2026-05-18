@@ -1,0 +1,11 @@
+{
+  "name": "jqanywhere-serverless",
+  "version": "0.6.0",
+  "private": true,
+  "description": "Serverless deployment tooling for JQAnywhere.",
+  "license": "MIT",
+  "devDependencies": {
+    "serverless": "4.36.1",
+    "serverless-localstack": "1.3.1"
+  }
+}

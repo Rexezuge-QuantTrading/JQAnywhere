@@ -1,7 +1,6 @@
 service: jqanywhere
 
 plugins:
-  - serverless-python-requirements
   - serverless-localstack
 
 provider:
@@ -23,7 +22,7 @@ provider:
     JQANYWHERE_PERSISTENCE: dynamodb
     JQANYWHERE_STATE_TABLE: '${self:service}-state'
     JQANYWHERE_NOTIFIER: sns
-    AWS_ENDPOINT_URL: '${env:AWS_ENDPOINT_URL, ""}'
+    AWS_ENDPOINT_URL: '${env:JQANYWHERE_AWS_ENDPOINT_URL, env:AWS_ENDPOINT_URL, ""}'
     SNS_TOPIC_ARN:
       Ref: NotificationTopic
   iam:
@@ -43,7 +42,7 @@ provider:
 
 functions:
   runner:
-    handler: jqanywhere.runtime.lambda_handler.run
+    handler: src/jqanywhere/runtime/lambda_handler.run
     timeout: 900
     reservedConcurrency: '${env:LAMBDA_RESERVED_CONCURRENCY, 1}'
     events:
