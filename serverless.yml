@@ -42,7 +42,7 @@ provider:
 
 functions:
   runner:
-    handler: jqanywhere.runtime.lambda_handler.run
+    handler: src/jqanywhere/runtime/lambda_handler.run
     timeout: 900
     reservedConcurrency: '${env:LAMBDA_RESERVED_CONCURRENCY, 1}'
     events:

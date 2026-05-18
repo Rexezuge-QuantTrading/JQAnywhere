@@ -211,9 +211,9 @@ Serverless
 
 The repository includes `serverless.yml` with:
 
-- Lambda handler: `jqanywhere.runtime.lambda_handler.run`
+- Lambda handler: `src/jqanywhere/runtime/lambda_handler.run` for the packaged `src/**` layout
 - EventBridge schedule
-- `serverless-python-requirements` packaging for pandas, numpy, adata, and other Python dependencies
+- Serverless Framework v4 Python requirements packaging for pandas, numpy, adata, and other Python dependencies
 - reserved Lambda concurrency defaulting to `1` to reduce overlapping scheduled runs
 - CloudWatch log retention through `LOG_RETENTION_DAYS`
 - DynamoDB state table
