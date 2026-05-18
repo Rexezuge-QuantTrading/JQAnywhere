@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections.abc import Iterable
+from datetime import date, datetime
 
 from jqanywhere.jqcompat.types import CurrentData, SecurityInfo
 
@@ -99,7 +100,7 @@ class MarketDataProvider(ABC):
         a DataFrame indexed by ``datetime`` with securities as columns; modern pandas
         users should prefer ``panel=False`` for equivalent DataFrame output.
         """
-        raise NotImplementedError("JQAnywhere v0.2 does not implement get_price for this data provider")
+        raise NotImplementedError("JQAnywhere v0.3 does not implement get_price for this data provider")
 
     def get_index_stocks(self, index_symbol: str, date=None) -> list[str]:
         """Return tradable constituent security codes for an index on a date.
@@ -110,15 +111,23 @@ class MarketDataProvider(ABC):
         In backtests, JoinQuant's default date is ``context.current_dt``; in research,
         the default is today. The return value is a list of stock codes.
         """
-        raise NotImplementedError("JQAnywhere v0.2 does not implement get_index_stocks for this data provider")
+        raise NotImplementedError("JQAnywhere v0.3 does not implement get_index_stocks for this data provider")
 
     def get_all_securities(self, types=None, date=None):
         """Return security metadata as a JoinQuant-style DataFrame indexed by code."""
-        raise NotImplementedError("JQAnywhere v0.2 does not implement get_all_securities for this data provider")
+        raise NotImplementedError("JQAnywhere v0.3 does not implement get_all_securities for this data provider")
 
     def get_security_info(self, code: str) -> SecurityInfo:
         """Return one security's JoinQuant-style metadata object."""
-        raise NotImplementedError("JQAnywhere v0.2 does not implement get_security_info for this data provider")
+        raise NotImplementedError("JQAnywhere v0.3 does not implement get_security_info for this data provider")
+
+    def get_trade_days(self, start_date=None, end_date=None, count=None) -> list[date]:
+        """Return trading days between dates, or the last ``count`` days up to ``end_date``."""
+        raise NotImplementedError("JQAnywhere v0.3 does not implement get_trade_days for this data provider")
+
+    def get_all_trade_days(self) -> list[date]:
+        """Return all trading days known by this data provider."""
+        raise NotImplementedError("JQAnywhere v0.3 does not implement get_all_trade_days for this data provider")
 
 
 class EmptyMarketDataProvider(MarketDataProvider):
@@ -132,11 +141,20 @@ class EmptyMarketDataProvider(MarketDataProvider):
     def get_current_data(self) -> dict[str, CurrentData]:
         return {}
 
+    def get_trade_days(self, start_date=None, end_date=None, count=None) -> list[date]:
+        return _filter_trade_days([], start_date, end_date, count)
+
+    def get_all_trade_days(self) -> list[date]:
+        return []
+
 
 class StaticMarketDataProvider(MarketDataProvider):
-    def __init__(self, history: dict[str, pd.DataFrame] | None = None, current: Iterable[str] | None = None):
+    def __init__(
+        self, history: dict[str, pd.DataFrame] | None = None, current: Iterable[str] | None = None, trade_days: Iterable | None = None
+    ):
         self.history = history or {}
         self.current = {code: CurrentData(code, paused=False) for code in (current or [])}
+        self.trade_days = sorted(_coerce_date(day) for day in (trade_days or []))
 
     def attribute_history(self, security: str, count: int, unit: str, fields, skip_paused: bool, df: bool, fq: str | None):
         if pd is None:
@@ -148,3 +166,36 @@ class StaticMarketDataProvider(MarketDataProvider):
 
     def get_current_data(self) -> dict[str, CurrentData]:
         return self.current
+
+    def get_trade_days(self, start_date=None, end_date=None, count=None) -> list[date]:
+        return _filter_trade_days(self.trade_days, start_date, end_date, count)
+
+    def get_all_trade_days(self) -> list[date]:
+        return list(self.trade_days)
+
+
+def _filter_trade_days(trade_days: list[date], start_date=None, end_date=None, count=None) -> list[date]:
+    if count is not None and start_date is not None:
+        raise ValueError("count and start_date are mutually exclusive")
+    if count is not None and (not isinstance(count, int) or count <= 0):
+        raise ValueError("count must be a positive integer")
+    end = _coerce_date(end_date) if end_date is not None else date.today()
+    days = [day for day in trade_days if day <= end]
+    if start_date is not None:
+        start = _coerce_date(start_date)
+        days = [day for day in days if day >= start]
+    if count is not None:
+        return days[-count:]
+    return days
+
+
+def _coerce_date(value) -> date:
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    if isinstance(value, str):
+        if pd is None:
+            return datetime.fromisoformat(value).date()
+        return pd.to_datetime(value).date()
+    raise TypeError("date values must be strings, date, or datetime")

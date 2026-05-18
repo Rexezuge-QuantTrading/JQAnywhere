@@ -3,14 +3,14 @@ JQAnywhere
 
 JQAnywhere is an MIT-licensed Python framework for running JoinQuant-style strategies on AWS-compatible infrastructure. The goal is to let users copy a supported JoinQuant strategy file unchanged, keep `from jqdata import *`, and run it locally, on AWS, or on LocalStack.
 
-Status: v0.2 alpha.
+Status: v0.3 alpha.
 
 Quick Start
 -----------
 
 ```bash
 pip install -e ".[dev]"
-jqanywhere run --config examples/jqanywhere.toml
+jqanywhere run --config examples/jqanywhere.toml --now 2026-05-18T09:50:00+08:00
 ```
 
 The example is intentionally small and public:
@@ -49,12 +49,14 @@ Internally, JQAnywhere separates runtime concerns:
 - `jqanywhere.persistence`: state stores such as memory and DynamoDB
 - `jqanywhere.notifications`: console and SNS notifications
 
-Supported In v0.2
+Supported In v0.3
 -----------------
 
 - `initialize(context)`
-- `run_daily(func, time, reference_security="")`
+- time-aware `run_daily(func, "HH:MM", reference_security="")`
 - `g`, `context`, `log`
+- `context.current_dt`
+- `context.previous_date` when the selected data provider exposes a trade calendar
 - `set_option`
 - `set_benchmark`
 - `set_slippage`
@@ -66,28 +68,34 @@ Supported In v0.2
 - `get_index_stocks`
 - `get_all_securities`
 - `get_security_info`
+- `get_trade_days`
+- `get_all_trade_days`
 - `order`
 - `order_target`
 - `order_value`
 - `order_target_value`
 - paper portfolio accounting
+- persisted paper portfolio cash and positions
 - in-memory state store
 - DynamoDB state store
 - console notifications
 - SNS notifications
 - AWS Lambda entrypoint
+- EventBridge event-time handling
 - Serverless deployment template
+- deterministic local invocation through `jqanywhere run --now ...`
 - LocalStack endpoint support through `AWS_ENDPOINT_URL`
 
 AData Provider
 --------------
 
-Set `[data].provider = "adata"` or `JQANYWHERE_DATA_PROVIDER=adata` to use AData-backed China market data. The v0.2 adapter maps JoinQuant-style APIs to the real `adata 2.9.x` SDK surface:
+Set `[data].provider = "adata"` or `JQANYWHERE_DATA_PROVIDER=adata` to use AData-backed China market data. The v0.3 adapter maps JoinQuant-style APIs to the real `adata 2.9.x` SDK surface:
 
 - stocks: daily prices, current quotes, code metadata, and latest-day minute data where AData exposes it
 - ETFs: daily prices, latest-day minute data, current quotes, and ETF metadata
 - indexes: daily prices, latest-day minute data, current quotes, index metadata, and index constituents
 - convertible bonds: metadata through `get_all_securities(types="bond")`
+- trade calendars through `get_trade_days` and `get_all_trade_days`
 
 Known AData-backed limits:
 
@@ -95,7 +103,7 @@ Known AData-backed limits:
 - JoinQuant fundamentals/query DSL is not implemented from AData finance data because AData only exposes selected core financial indicators
 - `fq="pre"` is the safest stock adjustment mode; other adjustment modes depend on upstream AData behavior
 
-Unsupported In v0.2
+Unsupported In v0.3
 -------------------
 
 These APIs are deliberately unsupported and should raise explicit `NotImplementedError` errors instead of silently doing the wrong thing:
@@ -147,6 +155,8 @@ Useful environment variables:
 - `JQANYWHERE_CONFIG`
 - `JQANYWHERE_STRATEGY_PATH`
 - `JQANYWHERE_STRATEGY_ID`
+- `JQANYWHERE_TIMEZONE`
+- `JQANYWHERE_DATA_PROVIDER`
 - `JQANYWHERE_INITIAL_CASH`
 - `JQANYWHERE_PERSISTENCE`
 - `JQANYWHERE_STATE_TABLE`

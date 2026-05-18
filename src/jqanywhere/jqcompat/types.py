@@ -1,4 +1,4 @@
-"""JoinQuant-compatible data types used by the v0.1 API subset."""
+"""JoinQuant-compatible data types used by the public API subset."""
 
 from __future__ import annotations
 

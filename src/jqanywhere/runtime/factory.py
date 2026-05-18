@@ -35,4 +35,5 @@ def build_engine(config: AppConfig) -> RuntimeEngine:
         state_store=state_store,
         notifier=notifier,
         initial_cash=config.broker.initial_cash,
+        timezone=config.runtime.timezone,
     )

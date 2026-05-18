@@ -10,7 +10,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from jqanywhere.data.base import MarketDataProvider
+from jqanywhere.data.base import MarketDataProvider, _filter_trade_days
 from jqanywhere.jqcompat.types import CurrentData, SecurityInfo
 
 
@@ -51,6 +51,12 @@ class ADataMarketDataProvider(MarketDataProvider):
 
     def get_current_data(self) -> dict[str, CurrentData]:
         return LazyCurrentData(self._fetch_current_data)
+
+    def get_trade_days(self, start_date=None, end_date=None, count=None) -> list[date]:
+        return _filter_trade_days(self.get_all_trade_days(), start_date, end_date, count)
+
+    def get_all_trade_days(self) -> list[date]:
+        return _calendar_dates(self._fetch_trade_calendar())
 
     def get_price(
         self,
@@ -164,6 +170,22 @@ class ADataMarketDataProvider(MarketDataProvider):
             end_date=_none_if_nan(row.get("end_date")),
             type=_none_if_nan(row.get("type")),
         )
+
+    def _fetch_trade_calendar(self) -> pd.DataFrame:
+        stock_info = getattr(getattr(self.adata, "stock", None), "info", None)
+        method = getattr(stock_info, "trade_calendar", None)
+        if method is None:
+            raise NotImplementedError("Installed adata package does not expose trade calendar data")
+        try:
+            return method()
+        except TypeError:
+            frames = []
+            for year in range(1990, date.today().year + 1):
+                try:
+                    frames.append(method(year=year))
+                except TypeError:
+                    frames.append(method(year))
+            return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
 
     def _all_stock_securities(self) -> pd.DataFrame:
         raw = self.adata.stock.info.all_code()
@@ -430,6 +452,31 @@ def _security_types(types) -> list[str]:
     if isinstance(types, str):
         return [types]
     return list(types)
+
+
+def _calendar_dates(raw: pd.DataFrame) -> list[date]:
+    if raw is None or raw.empty:
+        return []
+    date_column = next((column for column in ("trade_date", "cal_date", "calendar_date", "date") if column in raw.columns), None)
+    if date_column is None:
+        raise ValueError("trade calendar data does not include a date column")
+    data = raw.copy()
+    open_column = next((column for column in ("is_trade", "is_open", "trade_status", "status", "open") if column in data.columns), None)
+    if open_column is not None:
+        data = data[data[open_column].map(_is_open_trade_day)]
+    days = {_coerce_date(value) for value in data[date_column].dropna().tolist()}
+    return sorted(days)
+
+
+def _is_open_trade_day(value) -> bool:
+    if value is None or pd.isna(value):
+        return False
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int | float):
+        return int(value) == 1
+    text = str(value).strip().lower()
+    return text in {"1", "true", "t", "yes", "y", "open", "trade", "trading", "交易", "是"}
 
 
 def _infer_security_type(code: str) -> str | None:
