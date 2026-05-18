@@ -88,6 +88,16 @@ class CurrentData:
 
 
 @dataclass
+class SecurityInfo:
+    code: str
+    display_name: str | None = None
+    name: str | None = None
+    start_date: Any = None
+    end_date: Any = None
+    type: str | None = None
+
+
+@dataclass
 class Order:
     security: str
     amount: int

@@ -3,7 +3,7 @@ JQAnywhere
 
 JQAnywhere is an MIT-licensed Python framework for running JoinQuant-style strategies on AWS-compatible infrastructure. The goal is to let users copy a supported JoinQuant strategy file unchanged, keep `from jqdata import *`, and run it locally, on AWS, or on LocalStack.
 
-Status: v0.1 alpha.
+Status: v0.2 alpha.
 
 Quick Start
 -----------
@@ -13,7 +13,7 @@ pip install -e ".[dev]"
 jqanywhere run --config examples/jqanywhere.toml
 ```
 
-The v0.1 example is intentionally small and public:
+The example is intentionally small and public:
 
 ```python
 from jqdata import *
@@ -49,7 +49,7 @@ Internally, JQAnywhere separates runtime concerns:
 - `jqanywhere.persistence`: state stores such as memory and DynamoDB
 - `jqanywhere.notifications`: console and SNS notifications
 
-Supported In v0.1
+Supported In v0.2
 -----------------
 
 - `initialize(context)`
@@ -62,6 +62,10 @@ Supported In v0.1
 - `set_commission`
 - `attribute_history`
 - `get_current_data`
+- `get_price`
+- `get_index_stocks`
+- `get_all_securities`
+- `get_security_info`
 - `order`
 - `order_target`
 - `order_value`
@@ -75,7 +79,23 @@ Supported In v0.1
 - Serverless deployment template
 - LocalStack endpoint support through `AWS_ENDPOINT_URL`
 
-Unsupported In v0.1
+AData Provider
+--------------
+
+Set `[data].provider = "adata"` or `JQANYWHERE_DATA_PROVIDER=adata` to use AData-backed China market data. The v0.2 adapter maps JoinQuant-style APIs to the real `adata 2.9.x` SDK surface:
+
+- stocks: daily prices, current quotes, code metadata, and latest-day minute data where AData exposes it
+- ETFs: daily prices, latest-day minute data, current quotes, and ETF metadata
+- indexes: daily prices, latest-day minute data, current quotes, index metadata, and index constituents
+- convertible bonds: metadata through `get_all_securities(types="bond")`
+
+Known AData-backed limits:
+
+- historical minute data is only supported where the upstream AData endpoint exposes it; stock, ETF, and index minute endpoints are latest-trading-day oriented
+- JoinQuant fundamentals/query DSL is not implemented from AData finance data because AData only exposes selected core financial indicators
+- `fq="pre"` is the safest stock adjustment mode; other adjustment modes depend on upstream AData behavior
+
+Unsupported In v0.2
 -------------------
 
 These APIs are deliberately unsupported and should raise explicit `NotImplementedError` errors instead of silently doing the wrong thing:
