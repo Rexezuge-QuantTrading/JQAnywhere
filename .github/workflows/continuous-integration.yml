@@ -143,6 +143,16 @@ jobs:
       - name: Install Serverless Dependencies
         run: npm ci
 
+      - name: Generate Serverless Requirements
+        run: |
+          python - <<'PY'
+          import tomllib
+          from pathlib import Path
+
+          pyproject = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
+          Path("requirements.txt").write_text("\n".join(pyproject["project"]["dependencies"]) + "\n", encoding="utf-8")
+          PY
+
       - name: Start Floci
         run: |
           docker run -d --name floci \
