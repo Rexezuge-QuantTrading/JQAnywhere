@@ -36,7 +36,10 @@ class RuntimeSession:
     options: dict[str, Any] = field(default_factory=dict)
     benchmark: str | None = None
     slippage: Any = None
+    slippages: dict[str, Any] = field(default_factory=dict)
     order_cost: Any = None
+    order_costs: dict[str, Any] = field(default_factory=dict)
+    records: list[dict[str, Any]] = field(default_factory=list)
 
 
 _session: ContextVar[RuntimeSession | None] = ContextVar("jqanywhere_session", default=None)

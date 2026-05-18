@@ -129,6 +129,22 @@ class MarketDataProvider(ABC):
         """Return all trading days known by this data provider."""
         raise NotImplementedError("JQAnywhere v0.6 does not implement get_all_trade_days for this data provider")
 
+    def get_fundamentals(self, query, date=None, statDate=None):
+        """Return fundamentals for a JoinQuant-style query object."""
+        raise NotImplementedError("JQAnywhere v0.7 does not implement get_fundamentals for this data provider")
+
+    def get_valuation(self, security, end_date=None, fields=None, count=1):
+        """Return valuation fields for one or more securities."""
+        raise NotImplementedError("JQAnywhere v0.7 does not implement get_valuation for this data provider")
+
+    def get_industry(self, security, date=None):
+        """Return JoinQuant-shaped industry metadata keyed by security."""
+        raise NotImplementedError("JQAnywhere v0.7 does not implement get_industry for this data provider")
+
+    def get_extras(self, info, security_list, start_date=None, end_date=None, df=True, count=None):
+        """Return JoinQuant-style extras such as ETF unit net value."""
+        raise NotImplementedError("JQAnywhere v0.7 does not implement get_extras for this data provider")
+
 
 class EmptyMarketDataProvider(MarketDataProvider):
     def attribute_history(self, security: str, count: int, unit: str, fields, skip_paused: bool, df: bool, fq: str | None):
@@ -150,11 +166,20 @@ class EmptyMarketDataProvider(MarketDataProvider):
 
 class StaticMarketDataProvider(MarketDataProvider):
     def __init__(
-        self, history: dict[str, pd.DataFrame] | None = None, current: Iterable[str] | None = None, trade_days: Iterable | None = None
+        self,
+        history: dict[str, pd.DataFrame] | None = None,
+        current: Iterable[str] | None = None,
+        trade_days: Iterable | None = None,
+        fundamentals: pd.DataFrame | None = None,
+        industry: dict[str, dict] | None = None,
+        extras: dict | None = None,
     ):
         self.history = history or {}
         self.current = {code: CurrentData(code, paused=False) for code in (current or [])}
         self.trade_days = sorted(_coerce_date(day) for day in (trade_days or []))
+        self.fundamentals = fundamentals.copy() if fundamentals is not None else pd.DataFrame()
+        self.industry = industry or {}
+        self.extras = extras or {}
 
     def attribute_history(self, security: str, count: int, unit: str, fields, skip_paused: bool, df: bool, fq: str | None):
         if pd is None:
@@ -167,11 +192,83 @@ class StaticMarketDataProvider(MarketDataProvider):
     def get_current_data(self) -> dict[str, CurrentData]:
         return self.current
 
+    def get_price(
+        self,
+        security,
+        start_date=None,
+        end_date=None,
+        frequency="daily",
+        fields=None,
+        skip_paused=False,
+        fq="pre",
+        count=None,
+        panel=True,
+        fill_paused=True,
+    ):
+        securities = [security] if isinstance(security, str) else list(security)
+        field_list = _field_list(fields or ["open", "close", "high", "low", "volume", "money"])
+        frames = {code: self._price_frame(code, field_list, start_date, end_date, count) for code in securities}
+        if len(securities) == 1:
+            return frames[securities[0]]
+        if panel:
+            return {field: pd.concat({code: frames[code][field] for code in securities}, axis=1) for field in field_list}
+        return _flat_price_frame(frames, field_list)
+
     def get_trade_days(self, start_date=None, end_date=None, count=None) -> list[date]:
         return _filter_trade_days(self.trade_days, start_date, end_date, count)
 
     def get_all_trade_days(self) -> list[date]:
         return list(self.trade_days)
+
+    def get_fundamentals(self, query, date=None, statDate=None):
+        return _run_fundamentals_query(self.fundamentals, query)
+
+    def get_valuation(self, security, end_date=None, fields=None, count=1):
+        securities = [security] if isinstance(security, str) else list(security)
+        field_list = _field_list(fields or ["capitalization", "circulating_cap", "market_cap", "circulating_market_cap"])
+        data = _fundamentals_with_code(self.fundamentals)
+        if data.empty:
+            return pd.DataFrame(columns=field_list)
+        data = data[data["code"].isin(securities)] if "code" in data.columns else data.iloc[0:0]
+        if count is not None:
+            data = data.tail(count * max(len(securities), 1))
+        for field in field_list:
+            if field not in data.columns:
+                data[field] = pd.NA
+        return data[field_list].reset_index(drop=True)
+
+    def get_industry(self, security, date=None):
+        securities = [security] if isinstance(security, str) else list(security)
+        return {code: self.industry.get(code, {}) for code in securities}
+
+    def get_extras(self, info, security_list, start_date=None, end_date=None, df=True, count=None):
+        securities = [security_list] if isinstance(security_list, str) else list(security_list)
+        dates = _extras_dates(start_date, end_date, count)
+        configured = self.extras.get(info, {})
+        if isinstance(configured, pd.DataFrame):
+            result = configured.reindex(columns=securities)
+            if dates is not None:
+                result = result.reindex(pd.to_datetime(dates)).ffill().tail(len(dates))
+        else:
+            result = pd.DataFrame(index=pd.to_datetime(dates if dates is not None else [date.today()]))
+            for code in securities:
+                result[code] = configured.get(code, pd.NA) if isinstance(configured, dict) else pd.NA
+        return result if df else {code: result[code].to_numpy() for code in result.columns}
+
+    def _price_frame(self, security: str, fields: list[str], start_date=None, end_date=None, count=None) -> pd.DataFrame:
+        data = self.history.get(security, pd.DataFrame(columns=fields)).copy()
+        if not isinstance(data.index, pd.DatetimeIndex):
+            data.index = pd.to_datetime(data.index)
+        if start_date is not None:
+            data = data[data.index >= pd.to_datetime(start_date)]
+        if end_date is not None:
+            data = data[data.index <= pd.to_datetime(end_date)]
+        if count is not None:
+            data = data.tail(count)
+        for field in fields:
+            if field not in data.columns:
+                data[field] = pd.NA
+        return data[fields]
 
 
 def _filter_trade_days(trade_days: list[date], start_date=None, end_date=None, count=None) -> list[date]:
@@ -199,3 +296,70 @@ def _coerce_date(value) -> date:
             return datetime.fromisoformat(value).date()
         return pd.to_datetime(value).date()
     raise TypeError("date values must be strings, date, or datetime")
+
+
+def _field_list(fields) -> list[str]:
+    return [fields] if isinstance(fields, str) else list(fields)
+
+
+def _flat_price_frame(frames: dict[str, pd.DataFrame], fields: list[str]) -> pd.DataFrame:
+    rows = []
+    for code, frame in frames.items():
+        data = frame.reset_index()
+        time_column = data.columns[0]
+        data = data.rename(columns={time_column: "time"})
+        data.insert(1, "code", code)
+        rows.append(data[["time", "code", *fields]])
+    if not rows:
+        return pd.DataFrame(columns=["time", "code", *fields])
+    return pd.concat(rows, ignore_index=True)
+
+
+def _run_fundamentals_query(data: pd.DataFrame, query) -> pd.DataFrame:
+    from jqanywhere.jqcompat.query import FundamentalsQuery, QueryField
+
+    result = _fundamentals_with_code(data)
+    if not isinstance(query, FundamentalsQuery):
+        return result.reset_index(drop=True)
+    for condition in query.conditions:
+        mask = condition.evaluate(result).fillna(False).astype(bool)
+        result = result[mask]
+    if query.sort_keys:
+        sort_columns = []
+        ascending = []
+        for index, sort_key in enumerate(query.sort_keys):
+            column = f"__jq_sort_{index}"
+            result[column] = sort_key.expression.evaluate(result)
+            sort_columns.append(column)
+            ascending.append(sort_key.ascending)
+        result = result.sort_values(sort_columns, ascending=ascending, kind="mergesort")
+        result = result.drop(columns=sort_columns)
+    if query.limit_count is not None:
+        result = result.head(query.limit_count)
+    if query.fields:
+        columns = []
+        for query_field in query.fields:
+            name = query_field.name if isinstance(query_field, QueryField) else str(query_field)
+            if name not in result.columns:
+                result[name] = pd.NA
+            columns.append(name)
+        result = result[columns]
+    return result.reset_index(drop=True)
+
+
+def _fundamentals_with_code(data: pd.DataFrame) -> pd.DataFrame:
+    result = data.copy()
+    if "code" not in result.columns and result.index.name == "code":
+        result = result.reset_index()
+    return result
+
+
+def _extras_dates(start_date=None, end_date=None, count=None):
+    if count is not None:
+        end = pd.to_datetime(end_date).date() if end_date is not None else date.today()
+        return pd.date_range(end=end, periods=count, freq="D")
+    if start_date is None and end_date is None:
+        return None
+    start = pd.to_datetime(start_date if start_date is not None else end_date)
+    end = pd.to_datetime(end_date if end_date is not None else start_date)
+    return pd.date_range(start=start, end=end, freq="D")

@@ -2,8 +2,13 @@
 
 from __future__ import annotations
 
+import pandas as pd
+
+from jqanywhere.jqcompat.query import balance, cash_flow, income, indicator, query, valuation
 from jqanywhere.jqcompat.types import *
 from jqanywhere.runtime.state import get_session
+
+_QUERY_EXPORTS = (balance, cash_flow, income, indicator, query, valuation)
 
 try:
     import numpy as np
@@ -20,15 +25,23 @@ def set_option(key: str, value) -> None:
 
 
 def set_order_cost(cost: OrderCost, type="stock", ref=None) -> None:
-    get_session().order_cost = cost
+    session = get_session()
+    session.order_cost = cost
+    if type is not None:
+        session.order_costs[str(type)] = cost
 
 
 def set_commission(cost: PerTrade) -> None:
-    get_session().order_cost = cost
+    session = get_session()
+    session.order_cost = cost
+    session.order_costs["default"] = cost
 
 
 def set_slippage(obj: FixedSlippage, type=None, ref=None) -> None:
-    get_session().slippage = obj
+    session = get_session()
+    session.slippage = obj
+    if type is not None:
+        session.slippages[str(type)] = obj
 
 
 def run_daily(func, time: str, reference_security: str = "") -> None:
@@ -57,6 +70,35 @@ def attribute_history(
 
 def get_current_data():
     return get_session().data.get_current_data()
+
+
+def history(
+    count: int,
+    unit: str = "1d",
+    field: str = "close",
+    security_list=None,
+    df: bool = True,
+    skip_paused: bool = True,
+    fq: str | None = "pre",
+):
+    session = get_session()
+    securities = (
+        _portfolio_securities() if security_list is None else ([security_list] if isinstance(security_list, str) else list(security_list))
+    )
+    if not securities:
+        return pd.DataFrame() if df else {}
+    frames = {}
+    for security in securities:
+        data = session.data.attribute_history(security, count, unit, [field], skip_paused, True, fq)
+        frames[security] = data[field] if field in data else pd.Series(dtype=float)
+    result = pd.DataFrame(frames)
+    result.index = range(-len(result), 0)
+    return result if df else {security: result[security].to_numpy() for security in result.columns}
+
+
+def record(**kwargs) -> None:
+    session = get_session()
+    session.records.append({"time": session.context.current_dt.isoformat(), **kwargs})
 
 
 def order_target_value(security: str, value: float, style=MarketOrderStyle, side: str = "long", pindex: int = 0, close_today: bool = False):
@@ -97,6 +139,22 @@ def get_price(*args, **kwargs):
     return get_session().data.get_price(*args, **kwargs)
 
 
+def get_fundamentals(*args, **kwargs):
+    return get_session().data.get_fundamentals(*args, **kwargs)
+
+
+def get_valuation(*args, **kwargs):
+    return get_session().data.get_valuation(*args, **kwargs)
+
+
+def get_industry(*args, **kwargs):
+    return get_session().data.get_industry(*args, **kwargs)
+
+
+def get_extras(*args, **kwargs):
+    return get_session().data.get_extras(*args, **kwargs)
+
+
 def get_index_stocks(*args, **kwargs):
     return get_session().data.get_index_stocks(*args, **kwargs)
 
@@ -118,7 +176,7 @@ def get_all_trade_days(*args, **kwargs):
 
 
 def unsupported(name: str):
-    raise NotImplementedError(f"JQAnywhere v0.6 does not support {name}")
+    raise NotImplementedError(f"JQAnywhere v0.7 does not support {name}")
 
 
 def handle_data(*args, **kwargs):
@@ -133,19 +191,6 @@ def after_trading_end(*args, **kwargs):
     unsupported("after_trading_end")
 
 
-def get_fundamentals(*args, **kwargs):
-    unsupported("get_fundamentals")
-
-
-def query(*args, **kwargs):
-    unsupported("query/fundamentals DSL")
-
-
-class _UnsupportedTable:
-    def __getattr__(self, name):
-        unsupported(f"fundamentals field {name}")
-
-
 class _UnsupportedNamespace:
     def __init__(self, name: str):
         self.name = name
@@ -157,11 +202,6 @@ class _UnsupportedNamespace:
         unsupported(f"{self.name}.{name}")
 
 
-valuation = _UnsupportedTable()
-balance = _UnsupportedTable()
-cash_flow = _UnsupportedTable()
-income = _UnsupportedTable()
-indicator = _UnsupportedTable()
 finance = _UnsupportedNamespace("finance")
 macro = _UnsupportedNamespace("macro")
 
@@ -180,6 +220,10 @@ def get_all_factors(*args, **kwargs):
 
 def portfolio_optimizer(*args, **kwargs):
     unsupported("portfolio optimizer")
+
+
+def _portfolio_securities() -> list[str]:
+    return list(get_session().context.portfolio.positions)
 
 
 __all__ = [name for name in globals() if not name.startswith("_")]

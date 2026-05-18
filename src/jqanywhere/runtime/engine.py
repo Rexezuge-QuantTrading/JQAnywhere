@@ -11,7 +11,7 @@ from zoneinfo import ZoneInfo
 from jqanywhere.broker.base import Broker
 from jqanywhere.data.base import MarketDataProvider
 from jqanywhere.jqcompat.logging import BufferedLogger
-from jqanywhere.jqcompat.types import Context, Portfolio, Position
+from jqanywhere.jqcompat.types import Context, Portfolio, Position, RunParams
 from jqanywhere.notifications.base import Notifier
 from jqanywhere.persistence.base import StateStore
 from jqanywhere.runtime.loader import load_strategy
@@ -50,14 +50,22 @@ class RuntimeEngine:
         g = G()
         context = None
         token = None
+        records = []
         due_job_names = []
         try:
             persisted_g, portfolio, has_persisted_g, metadata, order_history = _decode_runtime_state(
                 self.state_store.load(self.strategy_id), self.initial_cash
             )
-            context = Context(portfolio=portfolio, current_dt=now, previous_date=self._previous_date(now), order_history=order_history)
+            context = Context(
+                portfolio=portfolio,
+                current_dt=now,
+                previous_date=self._previous_date(now),
+                order_history=order_history,
+                run_params=RunParams(type="sim_trade"),
+            )
             scheduler = Scheduler()
             session = RuntimeSession(self.strategy_id, context, g, log, scheduler, self.data, self.broker)
+            records = session.records
             token = bind_session(session)
             self.broker.sync_portfolio(context)
             module = load_strategy(self.strategy_path)
@@ -87,6 +95,7 @@ class RuntimeEngine:
                     due_job_names,
                     started_at,
                     metadata=metadata,
+                    records=records,
                     reason="duplicate_scheduled_run",
                 )
                 self._notify_result(result, logs)
@@ -112,6 +121,7 @@ class RuntimeEngine:
                         started_at,
                         metadata=claimed_metadata,
                         orders=claimed_orders,
+                        records=records,
                         reason="scheduled_run_claim_failed",
                     )
                     self._notify_result(result, logs)
@@ -139,6 +149,7 @@ class RuntimeEngine:
                 started_at,
                 metadata=metadata,
                 orders=context.order_history,
+                records=records,
             )
             self._notify_result(result, logs)
             return result
@@ -160,6 +171,7 @@ class RuntimeEngine:
                 started_at,
                 metadata=metadata,
                 orders=order_history,
+                records=records,
                 error={"type": type(exc).__name__, "message": str(exc)},
             )
             self._notify_result(result, logs)
@@ -238,6 +250,7 @@ def _runtime_result(
     reason: str | None = None,
     error: dict[str, str] | None = None,
     orders: list[dict[str, Any]] | None = None,
+    records: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     result = {
         "status": status,
@@ -251,6 +264,7 @@ def _runtime_result(
         "portfolio_value": portfolio.total_value if portfolio is not None else None,
         "metadata": metadata or {},
         "orders": orders or [],
+        "records": records or [],
     }
     if reason is not None:
         result["reason"] = reason

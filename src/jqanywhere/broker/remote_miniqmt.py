@@ -107,10 +107,11 @@ def _order_from_response(context: Context, security: str, response: dict[str, An
         amount=amount,
         value=value,
         price=price,
-        filled=status in {"filled", "succeeded", "completed"},
+        filled=filled_amount,
         status=status,
         filled_amount=filled_amount,
         commission=float(response.get("commission", 0.0) or 0.0),
+        avg_cost=float(response.get("avg_cost", response.get("avg_price", price)) or 0.0),
         reason=response.get("reason"),
         add_time=context.current_dt,
     )
