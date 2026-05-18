@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 from datetime import date, datetime, timedelta
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -32,6 +33,7 @@ class ADataMarketDataProvider(MarketDataProvider):
             import adata
         except ModuleNotFoundError as exc:  # pragma: no cover - exercised when optional dependency is absent.
             raise ModuleNotFoundError("adata is required when data.provider is 'adata'") from exc
+        _patch_adata_cookie_when_mini_racer_is_unavailable(adata)
         self.adata = adata
         self.strict_current_date = strict_current_date
 
@@ -270,6 +272,48 @@ _MULTI_PERIOD_FIELDS = set(_STANDARD_FIELDS)
 
 def _security_code(security: str) -> str:
     return security.split(".", maxsplit=1)[0]
+
+
+def _patch_adata_cookie_when_mini_racer_is_unavailable(adata_module: Any) -> None:
+    try:
+        from py_mini_racer import py_mini_racer
+    except Exception:
+        _patch_adata_static_ths_cookie(adata_module)
+        return
+
+    extension_path = getattr(py_mini_racer, "EXTENSION_PATH", None)
+    if extension_path is not None and not Path(extension_path).exists():
+        _patch_adata_static_ths_cookie(adata_module)
+        return
+
+    try:
+        py_mini_racer.MiniRacer()
+    except Exception:
+        _patch_adata_static_ths_cookie(adata_module)
+
+
+def _patch_adata_static_ths_cookie(adata_module: Any) -> None:
+    try:
+        from adata.common.headers import ths_headers
+        from adata.common.utils import cookie
+    except Exception:
+        return
+
+    text_headers = getattr(ths_headers, "text_headers", {})
+    header_cookie = text_headers.get("Cookie", "")
+    v_cookie = next((part.strip() for part in header_cookie.split(";") if part.strip().startswith("v=")), "")
+    if not v_cookie:
+        return
+
+    def ths_cookie(js_path="ths.js"):
+        del js_path
+        return f"{v_cookie};"
+
+    cookie.ths_cookie = ths_cookie
+    common = getattr(adata_module, "common", None)
+    common_utils = getattr(common, "utils", None)
+    if common_utils is not None:
+        common_utils.cookie = cookie
 
 
 def _is_etf(code: str) -> bool:
