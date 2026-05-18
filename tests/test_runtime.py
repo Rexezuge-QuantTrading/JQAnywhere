@@ -31,6 +31,6 @@ def test_unsupported_fundamentals_is_explicit():
     try:
         get_fundamentals(None)
     except NotImplementedError as exc:
-        assert "v0.1" in str(exc)
+        assert "v0.2" in str(exc)
     else:
         raise AssertionError("get_fundamentals should be unsupported")

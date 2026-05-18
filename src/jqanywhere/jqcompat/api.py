@@ -83,8 +83,16 @@ def get_index_stocks(*args, **kwargs):
     return get_session().data.get_index_stocks(*args, **kwargs)
 
 
+def get_all_securities(*args, **kwargs):
+    return get_session().data.get_all_securities(*args, **kwargs)
+
+
+def get_security_info(*args, **kwargs):
+    return get_session().data.get_security_info(*args, **kwargs)
+
+
 def unsupported(name: str):
-    raise NotImplementedError(f"JQAnywhere v0.1 does not support {name}")
+    raise NotImplementedError(f"JQAnywhere v0.2 does not support {name}")
 
 
 def get_fundamentals(*args, **kwargs):

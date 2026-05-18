@@ -25,7 +25,7 @@ def _stock_history():
     )
 
 
-def _install_adata(monkeypatch, *, stock_market=None, fund_market=None, stock_info=None):
+def _install_adata(monkeypatch, *, stock_market=None, fund_market=None, stock_info=None, fund_info=None, bond_info=None):
     cookie_module = types.SimpleNamespace(ths_cookie=lambda js_path="ths.js": "")
     utils_module = types.SimpleNamespace(cookie=cookie_module)
     headers_module = types.SimpleNamespace(text_headers={"Cookie": "foo=bar; v=static-token; baz=qux"})
@@ -36,7 +36,8 @@ def _install_adata(monkeypatch, *, stock_market=None, fund_market=None, stock_in
         types.SimpleNamespace(
             common=common_module,
             stock=types.SimpleNamespace(market=stock_market or types.SimpleNamespace(), info=stock_info or types.SimpleNamespace()),
-            fund=types.SimpleNamespace(market=fund_market or types.SimpleNamespace()),
+            fund=types.SimpleNamespace(market=fund_market or types.SimpleNamespace(), info=fund_info or types.SimpleNamespace()),
+            bond=types.SimpleNamespace(info=bond_info or types.SimpleNamespace()),
         ),
     )
     monkeypatch.setitem(sys.modules, "adata.common", common_module)
@@ -242,8 +243,9 @@ def test_adata_minute_history_excludes_current_minute_and_maps_trade_time(monkey
 
 def test_adata_current_data_maps_supported_attributes(monkeypatch):
     market = types.SimpleNamespace(
-        get_market_current=lambda **kwargs: pd.DataFrame(
+        list_market_current=lambda **kwargs: pd.DataFrame(
             {
+                "stock_code": ["000001"],
                 "price": [12.3],
                 "volume": [100],
                 "high_limit": [13.53],
@@ -270,7 +272,7 @@ def test_adata_current_data_maps_supported_attributes(monkeypatch):
 
 
 def test_adata_get_index_stocks_maps_codes(monkeypatch):
-    info = types.SimpleNamespace(get_index_stocks=lambda **kwargs: pd.DataFrame({"stock_code": ["600000", "000001"]}))
+    info = types.SimpleNamespace(index_constituent=lambda **kwargs: pd.DataFrame({"stock_code": ["600000", "000001"]}))
     _install_adata(monkeypatch, stock_info=info)
 
     result = ADataMarketDataProvider().get_index_stocks("000300.XSHG", date="2026-05-15")
@@ -278,9 +280,78 @@ def test_adata_get_index_stocks_maps_codes(monkeypatch):
     assert result == ["600000.XSHG", "000001.XSHE"]
 
 
-def test_adata_etf_minute_history_fails_explicitly(monkeypatch):
-    _install_adata(monkeypatch, fund_market=types.SimpleNamespace())
+def test_adata_get_all_securities_maps_stock_and_etf_metadata(monkeypatch):
+    stock_info = types.SimpleNamespace(
+        all_code=lambda: pd.DataFrame(
+            {
+                "stock_code": ["000001", "600000"],
+                "short_name": ["平安银行", "浦发银行"],
+                "exchange": ["SZ", "SH"],
+                "list_date": ["1991-04-03", "1999-11-10"],
+            }
+        )
+    )
+    fund_info = types.SimpleNamespace(
+        all_etf_exchange_traded_info=lambda: pd.DataFrame({"fund_code": ["518880"], "short_name": ["黄金ETF"], "net_value": [4.5]})
+    )
+    _install_adata(monkeypatch, stock_info=stock_info, fund_info=fund_info)
+
+    result = ADataMarketDataProvider().get_all_securities(["stock", "fund"])
+
+    assert result.loc["000001.XSHE", "display_name"] == "平安银行"
+    assert result.loc["600000.XSHG", "type"] == "stock"
+    assert result.loc["518880.XSHG", "display_name"] == "黄金ETF"
+    assert result.loc["518880.XSHG", "type"] == "fund"
+
+
+def test_adata_get_security_info_returns_metadata_object(monkeypatch):
+    stock_info = types.SimpleNamespace(
+        all_code=lambda: pd.DataFrame(
+            {"stock_code": ["000001"], "short_name": ["平安银行"], "exchange": ["SZ"], "list_date": ["1991-04-03"]}
+        )
+    )
+    _install_adata(monkeypatch, stock_info=stock_info)
+
+    result = ADataMarketDataProvider().get_security_info("000001.XSHE")
+
+    assert result.code == "000001.XSHE"
+    assert result.display_name == "平安银行"
+    assert result.type == "stock"
+
+
+def test_adata_etf_minute_history_uses_real_adata_endpoint(monkeypatch):
+    def get_market_etf_min(**kwargs):
+        return pd.DataFrame(
+            {
+                "trade_time": ["2026-05-15 09:30:00", "2026-05-15 09:31:00"],
+                "price": [1.0, 1.1],
+                "volume": [100, 200],
+            }
+        )
+
+    _install_adata(monkeypatch, fund_market=types.SimpleNamespace(get_market_etf_min=get_market_etf_min))
     provider = ADataMarketDataProvider()
 
-    with pytest.raises(NotImplementedError, match="ETF minute"):
-        provider.get_price("518880.XSHG", end_date="2026-05-15 09:31:00", count=1, frequency="1m", fields=["close"])
+    result = provider.get_price("518880.XSHG", end_date="2026-05-15 09:31:00", count=1, frequency="1m", fields=["close", "volume"])
+
+    assert result.index.tolist() == pd.to_datetime(["2026-05-15 09:31:00"]).tolist()
+    assert result["close"].tolist() == [1.1]
+    assert result["volume"].tolist() == [200]
+
+
+def test_adata_get_price_supports_index_daily_history(monkeypatch):
+    market = types.SimpleNamespace(
+        get_market_index=lambda **kwargs: pd.DataFrame(
+            {
+                "trade_date": ["2026-05-14", "2026-05-15"],
+                "open": [3000.0, 3010.0],
+                "close": [3010.0, 3020.0],
+                "volume": [1000, 1200],
+            }
+        )
+    )
+    _install_adata(monkeypatch, stock_market=market)
+
+    result = ADataMarketDataProvider().get_price("000300.XSHG", end_date="2026-05-15", count=1, fields=["close"])
+
+    assert result["close"].tolist() == [3020.0]

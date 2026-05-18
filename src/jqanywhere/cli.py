@@ -13,7 +13,8 @@ SUPPORTED_API = [
     "run_daily(func, time, reference_security='')",
     "g, context, log",
     "set_option, set_benchmark, set_slippage, set_order_cost, set_commission",
-    "attribute_history, get_current_data",
+    "attribute_history, get_current_data, get_price, get_index_stocks",
+    "get_all_securities, get_security_info",
     "order, order_target, order_value, order_target_value",
 ]
 
@@ -29,7 +30,7 @@ def main(argv: list[str] | None = None) -> None:
     invoke_parser.add_argument("--strategy", required=True)
     invoke_parser.add_argument("--config", default=None)
 
-    subparsers.add_parser("list-api", help="List v0.1 supported API surface")
+    subparsers.add_parser("list-api", help="List v0.2 supported API surface")
 
     args = parser.parse_args(argv)
     if args.command == "list-api":

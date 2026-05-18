@@ -11,7 +11,7 @@ import numpy as np
 import pandas as pd
 
 from jqanywhere.data.base import MarketDataProvider
-from jqanywhere.jqcompat.types import CurrentData
+from jqanywhere.jqcompat.types import CurrentData, SecurityInfo
 
 
 class LazyCurrentData(dict):
@@ -105,8 +105,10 @@ class ADataMarketDataProvider(MarketDataProvider):
 
     def get_index_stocks(self, index_symbol: str, date=None) -> list[str]:
         code = _security_code(index_symbol)
-        trade_date = _coerce_date(date or datetime.now()).strftime("%Y-%m-%d")
+        if date is not None:
+            _coerce_date(date)
         candidates = [
+            (getattr(getattr(self.adata, "stock", None), "info", None), "index_constituent"),
             (getattr(getattr(self.adata, "stock", None), "info", None), "get_index_stocks"),
             (getattr(getattr(self.adata, "stock", None), "info", None), "get_index_stock_cons"),
             (getattr(getattr(self.adata, "stock", None), "market", None), "get_index_stocks"),
@@ -115,7 +117,7 @@ class ADataMarketDataProvider(MarketDataProvider):
             method = getattr(owner, name, None)
             if method is None:
                 continue
-            raw = method(index_code=code, date=trade_date)
+            raw = method(index_code=code)
             if raw is None:
                 return []
             if isinstance(raw, pd.DataFrame):
@@ -125,6 +127,83 @@ class ADataMarketDataProvider(MarketDataProvider):
                 return []
             return [_jq_code(value) for value in raw]
         raise NotImplementedError("Installed adata package does not expose index constituent data")
+
+    def get_all_securities(self, types=None, date=None):
+        if date is not None:
+            _coerce_date(date)
+        security_types = _security_types(types)
+        frames = []
+        for security_type in security_types:
+            if security_type == "stock":
+                frames.append(self._all_stock_securities())
+            elif security_type in {"fund", "etf"}:
+                frames.append(self._all_etf_securities())
+            elif security_type == "index":
+                frames.append(self._all_index_securities())
+            elif security_type in {"bond", "cbond"}:
+                frames.append(self._all_bond_securities())
+            else:
+                raise NotImplementedError(f"AData security type is not supported: {security_type}")
+        if not frames:
+            return pd.DataFrame(columns=["display_name", "name", "start_date", "end_date", "type"])
+        return pd.concat(frames).sort_index()
+
+    def get_security_info(self, code: str) -> SecurityInfo:
+        security_type = _infer_security_type(code)
+        search_types = [security_type] if security_type else ["stock", "fund", "index", "bond"]
+        securities = self.get_all_securities(search_types)
+        jq_code = _jq_code(code)
+        if jq_code not in securities.index:
+            raise ValueError(f"Security not found: {code}")
+        row = securities.loc[jq_code]
+        return SecurityInfo(
+            code=jq_code,
+            display_name=_none_if_nan(row.get("display_name")),
+            name=_none_if_nan(row.get("name")),
+            start_date=_none_if_nan(row.get("start_date")),
+            end_date=_none_if_nan(row.get("end_date")),
+            type=_none_if_nan(row.get("type")),
+        )
+
+    def _all_stock_securities(self) -> pd.DataFrame:
+        raw = self.adata.stock.info.all_code()
+        data = pd.DataFrame(index=[_jq_stock_code(row.stock_code, getattr(row, "exchange", None)) for row in raw.itertuples()])
+        data["display_name"] = raw.get("short_name", pd.Series(index=raw.index, dtype=object)).to_list()
+        data["name"] = data["display_name"]
+        data["start_date"] = raw.get("list_date", pd.Series(index=raw.index, dtype=object)).to_list()
+        data["end_date"] = None
+        data["type"] = "stock"
+        return data
+
+    def _all_etf_securities(self) -> pd.DataFrame:
+        raw = self.adata.fund.info.all_etf_exchange_traded_info()
+        data = pd.DataFrame(index=[_jq_code(value) for value in raw["fund_code"].astype(str)])
+        data["display_name"] = raw.get("short_name", pd.Series(index=raw.index, dtype=object)).to_list()
+        data["name"] = data["display_name"]
+        data["start_date"] = None
+        data["end_date"] = None
+        data["type"] = "fund"
+        return data
+
+    def _all_index_securities(self) -> pd.DataFrame:
+        raw = self.adata.stock.info.all_index_code()
+        data = pd.DataFrame(index=[_jq_index_code(value) for value in raw["index_code"].astype(str)])
+        data["display_name"] = raw.get("name", pd.Series(index=raw.index, dtype=object)).to_list()
+        data["name"] = data["display_name"]
+        data["start_date"] = None
+        data["end_date"] = None
+        data["type"] = "index"
+        return data
+
+    def _all_bond_securities(self) -> pd.DataFrame:
+        raw = self.adata.bond.info.all_convert_code()
+        data = pd.DataFrame(index=[_jq_code(value) for value in raw["bond_code"].astype(str)])
+        data["display_name"] = raw.get("bond_name", pd.Series(index=raw.index, dtype=object)).to_list()
+        data["name"] = data["display_name"]
+        data["start_date"] = raw.get("listing_date", pd.Series(index=raw.index, dtype=object)).to_list()
+        data["end_date"] = raw.get("expire_date", pd.Series(index=raw.index, dtype=object)).to_list()
+        data["type"] = "bond"
+        return data
 
     def _fetch_history(
         self,
@@ -146,14 +225,24 @@ class ADataMarketDataProvider(MarketDataProvider):
         for _attempt in range(2):
             try:
                 if _is_etf(code):
-                    if unit_kind != "d":
-                        raise NotImplementedError("AData ETF minute history is not supported")
-                    raw = self.adata.fund.market.get_market_etf(
-                        fund_code=code,
-                        k_type=1,
-                        start_date=start_dt.strftime("%Y-%m-%d"),
-                        end_date=end_dt.strftime("%Y-%m-%d"),
-                    )
+                    if unit_kind == "m":
+                        raw = self.adata.fund.market.get_market_etf_min(fund_code=code)
+                    else:
+                        raw = self.adata.fund.market.get_market_etf(
+                            fund_code=code,
+                            k_type=1,
+                            start_date=start_dt.strftime("%Y-%m-%d"),
+                            end_date=end_dt.strftime("%Y-%m-%d"),
+                        )
+                elif _is_index_security(security):
+                    if unit_kind == "m":
+                        raw = self.adata.stock.market.get_market_index_min(index_code=code)
+                    else:
+                        raw = self.adata.stock.market.get_market_index(
+                            index_code=code,
+                            k_type=1,
+                            start_date=start_dt.strftime("%Y-%m-%d"),
+                        )
                 elif unit_kind == "d":
                     raw = self.adata.stock.market.get_market(
                         stock_code=code,
@@ -163,6 +252,8 @@ class ADataMarketDataProvider(MarketDataProvider):
                         adjust_type=adjust_type,
                     )
                 else:
+                    if explicit_start and start_dt.date() != end_dt.date():
+                        raise NotImplementedError("AData stock minute history only supports the latest trading day")
                     raw = self.adata.stock.market.get_market_min(stock_code=code)
             except NotImplementedError:
                 raise
@@ -199,6 +290,10 @@ class ADataMarketDataProvider(MarketDataProvider):
             "avg": "avg",
             "open_interest": "open_interest",
         }
+        if "close" in fields and "close" not in raw.columns and "price" in raw.columns:
+            field_map["close"] = "price"
+        if "avg" in fields and "avg" not in raw.columns and "avg_price" in raw.columns:
+            field_map["avg"] = "avg_price"
         available = {field_map.get(field, field): field for field in fields if field_map.get(field, field) in raw.columns}
         data = raw[list(available.keys())].copy() if available else pd.DataFrame(index=raw.index)
         data = data.rename(columns=available)
@@ -238,8 +333,10 @@ class ADataMarketDataProvider(MarketDataProvider):
         try:
             if _is_etf(code):
                 raw = self.adata.fund.market.get_market_etf_current(fund_code=code)
+            elif _is_index_security(security):
+                raw = self.adata.stock.market.get_market_index_current(index_code=code)
             else:
-                raw = self.adata.stock.market.get_market_current(stock_code=code)
+                raw = self.adata.stock.market.list_market_current(code_list=[code])
         except Exception:
             return CurrentData(security=security, paused=True)
 
@@ -261,7 +358,7 @@ class ADataMarketDataProvider(MarketDataProvider):
             low_limit=_float_or_none(_row_get(row, "low_limit")),
             is_st=_bool_or_none(_first_row_value(row, "is_st", "st")),
             day_open=_float_or_none(_first_row_value(row, "day_open", "open")),
-            name=_row_get(row, "name"),
+            name=_first_row_value(row, "name", "short_name"),
             industry_code=_row_get(row, "industry_code"),
         )
 
@@ -318,6 +415,32 @@ def _patch_adata_static_ths_cookie(adata_module: Any) -> None:
 
 def _is_etf(code: str) -> bool:
     return code.startswith(("51", "15", "58", "56"))
+
+
+def _is_index_security(security: str) -> bool:
+    code = _security_code(security)
+    if security.endswith(".XSHG") and code.startswith(("000", "880", "881", "882", "883", "884", "885", "886")):
+        return True
+    return security.endswith(".XSHE") and code.startswith("399")
+
+
+def _security_types(types) -> list[str]:
+    if types is None:
+        return ["stock"]
+    if isinstance(types, str):
+        return [types]
+    return list(types)
+
+
+def _infer_security_type(code: str) -> str | None:
+    security_code = _security_code(code)
+    if _is_etf(security_code):
+        return "fund"
+    if _is_index_security(code):
+        return "index"
+    if code.endswith((".XSHE", ".XSHG")) or security_code[:1] in {"0", "3", "6", "8"}:
+        return "stock"
+    return None
 
 
 def _parse_unit(unit: str) -> tuple[int, str]:
@@ -443,6 +566,23 @@ def _jq_code(code: Any) -> str:
     return f"{text}.XSHG" if text.startswith(("5", "6", "9")) else f"{text}.XSHE"
 
 
+def _jq_stock_code(code: Any, exchange: Any = None) -> str:
+    text = str(code).zfill(6)
+    exchange_text = str(exchange or "").upper()
+    if exchange_text == "SH":
+        return f"{text}.XSHG"
+    if exchange_text == "SZ":
+        return f"{text}.XSHE"
+    if exchange_text == "BJ":
+        return f"{text}.XSHG"
+    return _jq_code(text)
+
+
+def _jq_index_code(code: Any) -> str:
+    text = str(code).zfill(6)
+    return f"{text}.XSHE" if text.startswith("399") else f"{text}.XSHG"
+
+
 def _first_row_value(row: Any, *keys: str):
     for key in keys:
         value = _row_get(row, key)
@@ -462,6 +602,10 @@ def _bool_or_none(value) -> bool | None:
 def _row_get(row: Any, key: str, default=None):
     value = row.get(key, default)
     return default if value is None else value
+
+
+def _none_if_nan(value):
+    return None if value is None or pd.isna(value) else value
 
 
 def _parse_date(value) -> date | None:
