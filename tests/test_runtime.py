@@ -1,6 +1,8 @@
+import importlib
 from datetime import datetime
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -36,13 +38,17 @@ def test_unsupported_fundamentals_is_explicit():
         EmptyMarketDataProvider().get_fundamentals(None)
 
 
-def test_strategy_import_shims_are_available():
-    import jqfactor
-    from prettytable import PrettyTable
-    from talib import ATR
+def test_strategy_import_dependencies_are_available():
+    jqfactor = importlib.import_module("jqfactor")
+    PrettyTable = importlib.import_module("prettytable").PrettyTable
+    talib = importlib.import_module("talib")
 
     assert jqfactor.__all__ == ["get_all_factors", "get_factor_values", "get_factors"]
-    assert ATR([2, 3, 4], [1, 2, 3], [1.5, 2.5, 3.5], timeperiod=2)[-1] > 0
+    high = np.array([2, 3, 4], dtype=float)
+    low = np.array([1, 2, 3], dtype=float)
+    close = np.array([1.5, 2.5, 3.5], dtype=float)
+    assert talib.ATR(high, low, close, timeperiod=2)[-1] > 0
+    assert talib.SMA(close, timeperiod=2)[-1] == 3
     table = PrettyTable()
     table.field_names = ["code"]
     table.add_row(["000001.XSHE"])

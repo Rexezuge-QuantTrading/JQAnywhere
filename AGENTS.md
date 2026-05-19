@@ -13,7 +13,7 @@
 
 - Ruff is the formatter and linter source of truth in `pyproject.toml`; no Black, isort, mypy, or pre-commit config exists currently.
 - Ruff targets `py313` with `line-length = 140`, double quotes, spaces, LF endings, and source roots `src`, `tests`, `examples`.
-- The project requires Python `>=3.11`, is packaged as version `0.6.0`, and depends on `adata`, `boto3`, `numpy`, and `pandas`.
+- The project requires Python `>=3.11`, is packaged as version `0.7.0`, and depends on `adata`, `boto3`, `numpy`, `pandas`, and `TA-Lib`.
 - Keep the configured per-file Ruff ignores for JoinQuant compatibility: examples may use `from jqdata import *`, `src/jqanywhere/jqcompat/api.py` re-exports wildcard API types, and `src/jqdata/__init__.py` intentionally re-exports compatibility globals.
 
 ## Git Commit Messages
@@ -54,6 +54,7 @@
 - `load_config()` reads `jqanywhere.toml` by default, or `JQANYWHERE_CONFIG`; example config lives at `examples/jqanywhere.toml`.
 - Environment overrides include `JQANYWHERE_STRATEGY_PATH`, `JQANYWHERE_STRATEGY_ID`, `JQANYWHERE_TIMEZONE`, `JQANYWHERE_MODE`, `JQANYWHERE_DATA_PROVIDER`, `JQANYWHERE_DATA_STRICT_CURRENT_DATE`, `JQANYWHERE_MINIQMT_ENDPOINT`, `JQANYWHERE_DATA_ENDPOINT`, `JQANYWHERE_DATA_TOKEN_ENV`, `JQANYWHERE_BROKER`, `JQANYWHERE_INITIAL_CASH`, `JQANYWHERE_BROKER_ENDPOINT`, `JQANYWHERE_BROKER_TOKEN_ENV`, `JQANYWHERE_MINIQMT_ACCOUNT_ID`, `JQANYWHERE_MINIQMT_ACCOUNT_TYPE`, `JQANYWHERE_MINIQMT_STRATEGY_NAME`, `JQANYWHERE_ENABLE_LIVE_TRADING`, `JQANYWHERE_PERSISTENCE`, `JQANYWHERE_STATE_TABLE`, `JQANYWHERE_NOTIFIER`, `AWS_ENDPOINT_URL`, and `JQANYWHERE_EVENTBRIDGE_SCHEDULE`.
 - `serverless.yml` defaults Lambda runtime to `python3.13` via `LAMBDA_RUNTIME`, architecture to `arm64`, data provider to `adata`, persistence to DynamoDB, notifier to SNS, and reserved concurrency to `1`.
+- Serverless Framework v4 bundles Python requirements packaging for this project; do not add `serverless-python-requirements` to `serverless.yml`, `package.json`, or `package-lock.json`.
 - Serverless packaging includes `src/**`, `examples/**`, and `jqanywhere.toml`, and excludes `tests/**`, `.venv/**`, and `private/**`.
 
 ## Compatibility Constraints
