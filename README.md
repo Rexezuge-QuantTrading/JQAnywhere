@@ -3,7 +3,7 @@ JQAnywhere
 
 JQAnywhere is an MIT-licensed Python framework for running JoinQuant-style strategies on AWS-compatible infrastructure. The goal is to let users copy a supported JoinQuant strategy file unchanged, keep `from jqdata import *`, and run it locally, on AWS, or on LocalStack.
 
-Status: v0.6 alpha.
+Status: v0.7 alpha.
 
 Quick Start
 -----------
@@ -58,7 +58,7 @@ Internally, JQAnywhere separates runtime concerns:
 - `jqanywhere.persistence`: state stores such as memory and DynamoDB
 - `jqanywhere.notifications`: console and SNS notifications
 
-Supported In v0.6
+Supported In v0.7
 -----------------
 
 - `initialize(context)`
@@ -70,12 +70,14 @@ Supported In v0.6
 - `g`, `context`, `log`
 - `context.current_dt`
 - `context.previous_date` when the selected data provider exposes a trade calendar
+- `context.run_params.type`
 - `set_option`
 - `set_benchmark`
 - `set_slippage`
 - `set_order_cost`
 - `set_commission`
 - `attribute_history`
+- `history`
 - `get_current_data`
 - `get_price`
 - `get_index_stocks`
@@ -83,10 +85,20 @@ Supported In v0.6
 - `get_security_info`
 - `get_trade_days`
 - `get_all_trade_days`
+- import-compatible fundamentals query objects: `query`, `valuation`, `balance`, `cash_flow`, `income`, and `indicator`
+- `get_fundamentals` where the configured data provider supports fundamentals
+- `get_valuation` where the configured data provider supports valuation data
+- `get_industry` where the configured data provider supports industry data
+- `get_extras` where the configured data provider supports extras such as ETF unit net value
+- `record`
 - `order`
 - `order_target`
 - `order_value`
 - `order_target_value`
+- `cancel_order`
+- `get_open_orders`
+- `get_orders`
+- `get_trades` as an import-compatible empty trade map
 - paper portfolio accounting with market-data-based fills, fixed slippage, configured commission/order cost, rejection reasons, and order history
 - persisted paper portfolio cash and positions
 - persisted order history and failed-run metadata
@@ -109,26 +121,29 @@ Supported In v0.6
 - operational config/provider checks through `jqanywhere doctor --config ...`
 - API surface inspection through `jqanywhere list-api`
 - full `talib` package imports for copied strategies
+- import-compatible `jqfactor` package stubs for factor APIs that still fail explicitly when called
 - LocalStack endpoint support through `AWS_ENDPOINT_URL`
 
 AData Provider
 --------------
 
-Set `[data].provider = "adata"` or `JQANYWHERE_DATA_PROVIDER=adata` to use AData-backed China market data. The v0.6 adapter maps JoinQuant-style APIs to the real `adata 2.9.x` SDK surface:
+Set `[data].provider = "adata"` or `JQANYWHERE_DATA_PROVIDER=adata` to use AData-backed China market data. The v0.7 adapter maps JoinQuant-style APIs to the real `adata 2.9.x` SDK surface:
 
 - stocks: daily prices, current quotes, code metadata, and latest-day minute data where AData exposes it
 - ETFs: daily prices, latest-day minute data, current quotes, and ETF metadata
 - indexes: daily prices, latest-day minute data, current quotes, index metadata, and index constituents
 - convertible bonds: metadata through `get_all_securities(types="bond")`
 - trade calendars through `get_trade_days` and `get_all_trade_days`
+- Shenwan industry metadata through `get_industry` when the installed AData SDK exposes it
+- ETF net-value extras through `get_extras("unit_net_value", ...)`, `get_extras("acc_net_value", ...)`, and `get_extras("adj_net_value", ...)` where the installed AData SDK exposes those fields
 
 Known AData-backed limits:
 
 - historical minute data is only supported where the upstream AData endpoint exposes it; stock, ETF, and index minute endpoints are latest-trading-day oriented
-- JoinQuant fundamentals/query DSL is not implemented from AData finance data because AData only exposes selected core financial indicators
+- JoinQuant fundamentals/query DSL is import-compatible but not implemented from AData finance data because AData only exposes selected core financial indicators
 - `fq="pre"` is the safest stock adjustment mode; other adjustment modes depend on upstream AData behavior
 
-Unsupported In v0.6
+Unsupported In v0.7
 -------------------
 
 These APIs are deliberately unsupported and should raise explicit `NotImplementedError` errors instead of silently doing the wrong thing:
@@ -136,11 +151,10 @@ These APIs are deliberately unsupported and should raise explicit `NotImplemente
 - `handle_data`
 - tick/minute event loop
 - tick/minute event-loop schedule alias `every_bar`
-- fundamentals/query DSL: `query`, `valuation`, `balance`, `cash_flow`, `income`, `indicator`
-- `get_fundamentals`
+- fundamentals/query execution when the selected provider does not implement fundamentals
 - `finance.run_query`
 - `macro.run_query`
-- factor APIs
+- factor APIs beyond import-compatible `jqfactor` stubs
 - portfolio optimizer
 - margin trading
 - futures
