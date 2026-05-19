@@ -7,7 +7,7 @@ from typing import Any
 
 import pandas as pd
 
-from jqanywhere.data.base import MarketDataProvider, _filter_trade_days
+from jqanywhere.data.base import _VALUATION_FIELDS, MarketDataProvider, _filter_trade_days, _flat_price_frame
 from jqanywhere.jqcompat.types import CurrentData, SecurityInfo
 
 
@@ -81,7 +81,59 @@ class RemoteMiniQmtMarketDataProvider(MarketDataProvider):
             return frames[securities[0]]
         if panel:
             return {field: pd.concat({code: frames[code][field] for code in securities}, axis=1) for field in field_list}
-        return pd.concat(frames, names=["security", "datetime"])
+        return _flat_price_frame(frames, field_list)
+
+    def get_fundamentals(self, query, date=None, statDate=None):
+        response = self.client.post(
+            "/v1/market/fundamentals",
+            {"query": _query_payload(query), "date": _date_value(date), "statDate": _date_value(statDate)},
+        )
+        return pd.DataFrame(response.get("rows", response.get("data", [])))
+
+    def get_valuation(self, security, start_date=None, end_date=None, fields=None, count=None):
+        securities = [security] if isinstance(security, str) else list(security)
+        field_list = _field_list(fields or _VALUATION_FIELDS)
+        response = self.client.post(
+            "/v1/market/valuation",
+            {
+                "securities": securities,
+                "start_date": _date_value(start_date),
+                "end_date": _date_value(end_date),
+                "fields": field_list,
+                "count": count,
+            },
+        )
+        data = pd.DataFrame(response.get("rows", response.get("data", [])))
+        for field in field_list:
+            if field not in data.columns:
+                data[field] = pd.NA
+        return data[field_list]
+
+    def get_industry(self, security, date=None):
+        securities = [security] if isinstance(security, str) else list(security)
+        response = self.client.post("/v1/market/industry", {"securities": securities, "date": _date_value(date)})
+        return dict(response.get("industry", response.get("data", {})))
+
+    def get_extras(self, info, security_list, start_date=None, end_date=None, df=True, count=None):
+        securities = [security_list] if isinstance(security_list, str) else list(security_list)
+        response = self.client.post(
+            "/v1/market/extras",
+            {
+                "info": info,
+                "securities": securities,
+                "start_date": _date_value(start_date),
+                "end_date": _date_value(end_date),
+                "count": count,
+            },
+        )
+        data = pd.DataFrame(response.get("rows", response.get("data", [])))
+        if data.empty:
+            data = pd.DataFrame(columns=["time", *securities])
+        index_column = next((column for column in ("datetime", "date", "time") if column in data.columns), None)
+        if index_column is not None:
+            data.index = pd.to_datetime(data.pop(index_column))
+        data = data.reindex(columns=securities)
+        return data if df else {code: data[code].to_numpy() for code in data.columns}
 
     def get_index_stocks(self, index_symbol: str, date=None) -> list[str]:
         response = self.client.post("/v1/market/index-stocks", {"index_symbol": index_symbol, "date": _date_value(date)})
@@ -127,10 +179,16 @@ class RemoteMiniQmtMarketDataProvider(MarketDataProvider):
             security=security,
             paused=bool(payload.get("paused", False)),
             last_price=_float_or_none(payload.get("last_price")),
+            high=_float_or_none(payload.get("high")),
+            low=_float_or_none(payload.get("low")),
             high_limit=_float_or_none(payload.get("high_limit")),
             low_limit=_float_or_none(payload.get("low_limit")),
             is_st=payload.get("is_st"),
             day_open=_float_or_none(payload.get("day_open")),
+            pre_close=_float_or_none(payload.get("pre_close")),
+            volume=_float_or_none(payload.get("volume")),
+            money=_float_or_none(payload.get("money")),
+            avg_price=_float_or_none(payload.get("avg_price")),
             name=payload.get("name"),
             industry_code=payload.get("industry_code"),
         )
@@ -138,6 +196,16 @@ class RemoteMiniQmtMarketDataProvider(MarketDataProvider):
 
 def _field_list(fields) -> list[str]:
     return [fields] if isinstance(fields, str) else list(fields)
+
+
+def _query_payload(query) -> dict[str, Any]:
+    return {
+        "fields": [str(field) for field in getattr(query, "fields", [])],
+        "conditions": [str(condition) for condition in getattr(query, "conditions", [])],
+        "order_by": [str(sort_key.expression) for sort_key in getattr(query, "sort_keys", [])],
+        "ascending": [sort_key.ascending for sort_key in getattr(query, "sort_keys", [])],
+        "limit": getattr(query, "limit_count", None),
+    }
 
 
 def _rows(response: dict[str, Any]) -> list[dict[str, Any]]:

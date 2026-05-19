@@ -200,15 +200,17 @@ def test_adata_get_price_multiple_securities_panel_shape(monkeypatch):
     assert result["close"]["000002.XSHE"].tolist() == [112.5, 113.5]
 
 
-def test_adata_get_price_panel_false_multiindex(monkeypatch):
+def test_adata_get_price_panel_false_flat_joinquant_shape(monkeypatch):
     market = types.SimpleNamespace(get_market=lambda **kwargs: _stock_history())
     _install_adata(monkeypatch, stock_market=market)
 
     provider = ADataMarketDataProvider()
     result = provider.get_price(["000001.XSHE", "000002.XSHE"], end_date="2026-05-15", count=1, fields=["close"], panel=False)
 
-    assert result.index.names == ["security", "datetime"]
-    assert result.loc[("000001.XSHE", pd.Timestamp("2026-05-15")), "close"] == 13.5
+    assert list(result.columns) == ["time", "code", "close"]
+    assert result.loc[0, "code"] == "000001.XSHE"
+    assert result.loc[0, "time"] == pd.Timestamp("2026-05-15")
+    assert result.loc[0, "close"] == 13.5
 
 
 def test_adata_get_price_rejects_ambiguous_and_panel_skip_paused(monkeypatch):
@@ -317,6 +319,52 @@ def test_adata_get_security_info_returns_metadata_object(monkeypatch):
     assert result.code == "000001.XSHE"
     assert result.display_name == "平安银行"
     assert result.type == "stock"
+
+
+def test_adata_get_industry_maps_sw_payload(monkeypatch):
+    calls = []
+
+    def get_industry_sw(**kwargs):
+        calls.append(kwargs)
+        return pd.DataFrame(
+            {
+                "industry_level": ["一级", "二级"],
+                "industry_code": ["801000", "801780"],
+                "industry_name": ["金融", "银行"],
+            }
+        )
+
+    stock_info = types.SimpleNamespace(get_industry_sw=get_industry_sw)
+    _install_adata(monkeypatch, stock_info=stock_info)
+
+    result = ADataMarketDataProvider().get_industry(["000001.XSHE"], date="2026-05-15")
+
+    assert result["000001.XSHE"]["sw_l2"]["industry_name"] == "银行"
+    assert calls == [{"stock_code": "000001", "date": "2026-05-15"}]
+
+
+def test_adata_get_extras_maps_etf_unit_net_value(monkeypatch):
+    fund_info = types.SimpleNamespace(all_etf_exchange_traded_info=lambda: pd.DataFrame({"fund_code": ["510300"], "net_value": [4.25]}))
+    _install_adata(monkeypatch, fund_info=fund_info)
+
+    result = ADataMarketDataProvider().get_extras("unit_net_value", "510300.XSHG", start_date="2026-05-15", end_date="2026-05-15")
+
+    assert result.loc[pd.Timestamp("2026-05-15"), "510300.XSHG"] == 4.25
+
+
+def test_adata_get_extras_validates_official_fields(monkeypatch):
+    fund_info = types.SimpleNamespace(all_etf_exchange_traded_info=lambda: pd.DataFrame({"fund_code": ["510300"], "net_value": [4.25]}))
+    _install_adata(monkeypatch, fund_info=fund_info)
+    provider = ADataMarketDataProvider()
+
+    result = provider.get_extras("acc_net_value", "510300.XSHG", count=1)
+
+    with pytest.raises(NotImplementedError, match="futures_sett_price"):
+        provider.get_extras("futures_sett_price", "IF9999.CCFX", count=1)
+    with pytest.raises(NotImplementedError, match="net_value"):
+        provider.get_extras("net_value", "510300.XSHG", count=1)
+
+    assert result.iloc[-1, 0] == 4.25
 
 
 def test_adata_get_trade_days_filters_calendar(monkeypatch):

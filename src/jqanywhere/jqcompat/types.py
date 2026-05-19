@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
+from enum import Enum
 from typing import Any
 
 
@@ -15,10 +16,26 @@ class OrderCost:
     close_commission: float = 0.0
     close_today_commission: float = 0.0
     min_commission: float = 0.0
+    type: str | None = None
+    ref: str | None = None
+
+
+class BaseSlippage:
+    pass
 
 
 @dataclass
-class FixedSlippage:
+class FixedSlippage(BaseSlippage):
+    value: float = 0.0
+
+
+@dataclass
+class PriceRelatedSlippage(BaseSlippage):
+    value: float = 0.0
+
+
+@dataclass
+class StepRelatedSlippage(BaseSlippage):
     value: float = 0.0
 
 
@@ -49,6 +66,11 @@ class Position:
 
 
 @dataclass
+class RunParams:
+    type: str = "sim_trade"
+
+
+@dataclass
 class Portfolio:
     starting_cash: float
     available_cash: float
@@ -73,6 +95,7 @@ class Context:
     current_dt: datetime
     previous_date: Any = None
     order_history: list[Any] = field(default_factory=list)
+    run_params: RunParams = field(default_factory=RunParams)
 
 
 @dataclass
@@ -80,10 +103,16 @@ class CurrentData:
     security: str
     paused: bool = False
     last_price: float | None = None
+    high: float | None = None
+    low: float | None = None
     high_limit: float | None = None
     low_limit: float | None = None
     is_st: bool | None = None
     day_open: float | None = None
+    pre_close: float | None = None
+    volume: float | None = None
+    money: float | None = None
+    avg_price: float | None = None
     name: str | None = None
     industry_code: str | None = None
 
@@ -98,15 +127,29 @@ class SecurityInfo:
     type: str | None = None
 
 
+class OrderStatus(Enum):
+    new = 8
+    open = 0
+    filled = 1
+    canceled = 2
+    rejected = 3
+    held = 4
+
+
 @dataclass
 class Order:
     security: str
     amount: int
     value: float
     price: float
-    filled: bool = True
-    status: str = "filled"
+    filled: int = 0
+    status: OrderStatus = OrderStatus.held
     filled_amount: int | None = None
     commission: float = 0.0
+    avg_cost: float = 0.0
     reason: str | None = None
     add_time: datetime | None = None
+    is_buy: bool = True
+    order_id: str | None = None
+    side: str = "long"
+    action: str = "open"

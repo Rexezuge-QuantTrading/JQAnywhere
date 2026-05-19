@@ -3,7 +3,17 @@
 from __future__ import annotations
 
 from jqanywhere.broker.base import Broker
-from jqanywhere.jqcompat.types import Context, FixedSlippage, Order, OrderCost, PerTrade, Position
+from jqanywhere.jqcompat.types import (
+    Context,
+    FixedSlippage,
+    Order,
+    OrderCost,
+    OrderStatus,
+    PerTrade,
+    Position,
+    PriceRelatedSlippage,
+    StepRelatedSlippage,
+)
 from jqanywhere.runtime.state import get_session
 
 
@@ -35,31 +45,40 @@ class PaperBroker(Broker):
         target_amount = int(target_value / price) if price > 0 else 0
         delta_amount = target_amount - current_amount
         if delta_amount == 0:
-            order = Order(security=security, amount=0, value=0.0, price=price, filled_amount=0, add_time=context.current_dt)
+            order = Order(
+                security=security,
+                amount=0,
+                value=0.0,
+                price=price,
+                filled=0,
+                filled_amount=0,
+                add_time=context.current_dt,
+                order_id=_next_order_id(context),
+            )
             _record_order(context, order)
             return order
 
-        execution_price = _execution_price(price, delta_amount)
+        execution_price = _execution_price(security, price, delta_amount)
         if _blocked_by_price_limit(current_data, execution_price, delta_amount):
             order = _rejected_order(context, security, delta_amount, 0.0, execution_price, "price_limit")
             _record_order(context, order)
             return order
 
         trade_value = abs(delta_amount) * execution_price
-        commission = _commission(trade_value, delta_amount, kwargs)
+        commission = _commission(security, trade_value, delta_amount, kwargs)
 
         if delta_amount > 0:
             max_affordable = int(context.portfolio.available_cash / execution_price) if execution_price > 0 else 0
             while (
                 max_affordable > 0
-                and max_affordable * execution_price + _commission(max_affordable * execution_price, max_affordable, kwargs)
+                and max_affordable * execution_price + _commission(security, max_affordable * execution_price, max_affordable, kwargs)
                 > context.portfolio.available_cash
             ):
                 max_affordable -= 1
             if delta_amount > max_affordable:
                 delta_amount = max_affordable
                 trade_value = delta_amount * execution_price
-                commission = _commission(trade_value, delta_amount, kwargs)
+                commission = _commission(security, trade_value, delta_amount, kwargs)
             if delta_amount <= 0:
                 order = _rejected_order(context, security, 0, 0.0, execution_price, "insufficient_cash")
                 _record_order(context, order)
@@ -75,7 +94,7 @@ class PaperBroker(Broker):
             delta_amount = -sell_amount
             target_amount = current_amount - sell_amount
             trade_value = sell_amount * execution_price
-            commission = _commission(trade_value, delta_amount, kwargs)
+            commission = _commission(security, trade_value, delta_amount, kwargs)
             context.portfolio.available_cash += trade_value - commission
 
         if target_amount <= 0:
@@ -92,12 +111,19 @@ class PaperBroker(Broker):
 
         order = Order(
             security=security,
-            amount=delta_amount,
+            amount=abs(delta_amount),
             value=trade_value,
             price=execution_price,
-            filled_amount=delta_amount,
+            filled=abs(delta_amount),
+            status=OrderStatus.held,
+            filled_amount=abs(delta_amount),
             commission=commission,
+            avg_cost=current.avg_cost if current is not None else execution_price,
             add_time=context.current_dt,
+            order_id=_next_order_id(context),
+            is_buy=delta_amount > 0,
+            side=kwargs.get("side", "long"),
+            action="open" if delta_amount > 0 else "close",
         )
         _record_order(context, order)
         return order
@@ -141,17 +167,23 @@ def _current_data(security: str):
         return None
 
 
-def _execution_price(price: float, amount: int) -> float:
-    slippage = get_session().slippage
+def _execution_price(security: str, price: float, amount: int) -> float:
+    slippage = _session_value("slippages", "slippage", security)
     if isinstance(slippage, FixedSlippage):
+        return max(price + slippage.value if amount > 0 else price - slippage.value, 0.0)
+    if isinstance(slippage, PriceRelatedSlippage):
+        delta = price * slippage.value
+        return max(price + delta if amount > 0 else price - delta, 0.0)
+    if isinstance(slippage, StepRelatedSlippage):
         return max(price + slippage.value if amount > 0 else price - slippage.value, 0.0)
     return price
 
 
-def _commission(value: float, amount: int, kwargs) -> float:
-    cost = get_session().order_cost
+def _commission(security: str, value: float, amount: int, kwargs) -> float:
+    cost = _session_value("order_costs", "order_cost", security)
     if isinstance(cost, OrderCost):
-        rate = cost.open_commission if amount > 0 else cost.close_commission + cost.close_tax
+        close_commission = cost.close_today_commission if amount < 0 and kwargs.get("close_today") else cost.close_commission
+        rate = cost.open_commission + cost.open_tax if amount > 0 else close_commission + cost.close_tax
         return max(value * rate, cost.min_commission if value else 0.0)
     if isinstance(cost, PerTrade):
         rate = cost.buy_cost if amount > 0 else cost.sell_cost
@@ -179,12 +211,33 @@ def _rejected_order(context: Context, security: str, amount: int, value: float, 
         amount=amount,
         value=value,
         price=price,
-        filled=False,
-        status="rejected",
+        filled=0,
+        status=OrderStatus.rejected,
         filled_amount=0,
         reason=reason,
         add_time=context.current_dt,
+        order_id=_next_order_id(context),
+        is_buy=amount > 0,
+        action="open" if amount > 0 else "close",
     )
+
+
+def _next_order_id(context: Context) -> str:
+    return f"paper-{len(context.order_history) + 1}"
+
+
+def _session_value(mapping_name: str, fallback_name: str, security: str):
+    session = get_session()
+    mapping = getattr(session, mapping_name)
+    asset_type = _asset_type(security)
+    return mapping.get(security) or mapping.get(asset_type) or mapping.get("default") or getattr(session, fallback_name)
+
+
+def _asset_type(security: str) -> str:
+    code = security.split(".", maxsplit=1)[0]
+    if code.startswith(("15", "16", "18", "50", "51", "56", "58")):
+        return "fund"
+    return "stock"
 
 
 def _record_order(context: Context, order: Order) -> None:
@@ -195,10 +248,15 @@ def _record_order(context: Context, order: Order) -> None:
             "value": order.value,
             "price": order.price,
             "filled": order.filled,
-            "status": order.status,
+            "status": order.status.name if isinstance(order.status, OrderStatus) else str(order.status),
             "filled_amount": order.filled_amount if order.filled_amount is not None else order.amount,
             "commission": order.commission,
+            "avg_cost": order.avg_cost,
             "reason": order.reason,
             "add_time": order.add_time.isoformat() if order.add_time is not None else None,
+            "order_id": order.order_id,
+            "is_buy": order.is_buy,
+            "side": order.side,
+            "action": order.action,
         }
     )

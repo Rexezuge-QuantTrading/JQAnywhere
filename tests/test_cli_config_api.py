@@ -82,7 +82,7 @@ def test_cli_run_json_outputs_valid_json(tmp_path, capsys):
 
 def test_documented_unsupported_surfaces_are_explicit():
     for func in (handle_data, before_trading_start, finance.run_query, macro.run_query):
-        with pytest.raises(NotImplementedError, match="v0.6"):
+        with pytest.raises(NotImplementedError, match="v0.7"):
             func(None)
 
 

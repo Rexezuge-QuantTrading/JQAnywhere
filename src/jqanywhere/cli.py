@@ -18,19 +18,20 @@ SUPPORTED_API = [
     "before_trading_start(context), after_trading_end(context)",
     "g, context, log",
     "set_option, set_benchmark, set_slippage, set_order_cost, set_commission",
-    "attribute_history, get_current_data, get_price, get_index_stocks",
+    "attribute_history, history, get_current_data, get_price, get_index_stocks",
     "get_all_securities, get_security_info, get_trade_days, get_all_trade_days",
+    "query, valuation, balance, cash_flow, income, indicator, get_fundamentals where provider supports fundamentals",
+    "get_valuation, get_industry, get_extras where provider supports those datasets",
+    "record, OrderStatus, context.run_params",
     "order, order_target, order_value, order_target_value",
     "jqanywhere doctor",
 ]
 
 UNSUPPORTED_API = [
     "handle_data",
-    "get_fundamentals",
-    "query, valuation, balance, cash_flow, income, indicator",
     "finance.run_query",
     "macro.run_query",
-    "factor APIs",
+    "factor APIs beyond import-compatible jqfactor stubs",
     "portfolio optimizer",
     "every_bar and tick/minute event loops",
     "futures and margin trading",
@@ -52,7 +53,7 @@ def main(argv: list[str] | None = None) -> None:
     invoke_parser.add_argument("--now", default=None, help="Invocation time as an ISO-8601 datetime")
     invoke_parser.add_argument("--json", action="store_true", help="Print machine-readable JSON")
 
-    list_api_parser = subparsers.add_parser("list-api", help="List v0.6 API surface")
+    list_api_parser = subparsers.add_parser("list-api", help="List v0.7 API surface")
     list_api_parser.add_argument("--json", action="store_true", help="Print machine-readable JSON")
 
     doctor_parser = subparsers.add_parser("doctor", help="Check config and selected providers")

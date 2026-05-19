@@ -10,7 +10,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from jqanywhere.data.base import MarketDataProvider, _filter_trade_days
+from jqanywhere.data.base import MarketDataProvider, _filter_trade_days, _flat_price_frame
 from jqanywhere.jqcompat.types import CurrentData, SecurityInfo
 
 
@@ -107,7 +107,7 @@ class ADataMarketDataProvider(MarketDataProvider):
             return frames[securities[0]]
         if panel:
             return {field: pd.concat({code: frames[code][field] for code in securities}, axis=1) for field in field_list}
-        return pd.concat(frames, names=["security", "datetime"])
+        return _flat_price_frame(frames, field_list)
 
     def get_index_stocks(self, index_symbol: str, date=None) -> list[str]:
         code = _security_code(index_symbol)
@@ -171,6 +171,27 @@ class ADataMarketDataProvider(MarketDataProvider):
             type=_none_if_nan(row.get("type")),
         )
 
+    def get_industry(self, security, date=None):
+        query_date = _coerce_date(date) if date is not None else None
+        securities = [security] if isinstance(security, str) else list(security)
+        return {code: self._industry_for_security(code, query_date) for code in securities}
+
+    def get_extras(self, info, security_list, start_date=None, end_date=None, df=True, count=None):
+        if info not in _EXTRA_FIELDS:
+            raise NotImplementedError(f"AData does not expose extras field: {info}")
+        securities = [security_list] if isinstance(security_list, str) else list(security_list)
+        if info == "is_st":
+            values = {code: self.get_current_data()[code].is_st for code in securities}
+        elif info in {"unit_net_value", "acc_net_value", "adj_net_value"}:
+            values = self._etf_unit_net_values(securities)
+        else:
+            raise NotImplementedError(f"AData does not expose extras field: {info}")
+        index = _extras_index(start_date, end_date, count)
+        result = pd.DataFrame(index=index)
+        for code in securities:
+            result[code] = values.get(code, pd.NA)
+        return result if df else {code: result[code].to_numpy() for code in result.columns}
+
     def _fetch_trade_calendar(self) -> pd.DataFrame:
         stock_info = getattr(getattr(self.adata, "stock", None), "info", None)
         method = getattr(stock_info, "trade_calendar", None)
@@ -186,6 +207,34 @@ class ADataMarketDataProvider(MarketDataProvider):
                 except TypeError:
                     frames.append(method(year))
             return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+
+    def _industry_for_security(self, security: str, query_date: date | None = None) -> dict:
+        method = getattr(getattr(self.adata.stock, "info", None), "get_industry_sw", None)
+        if method is None:
+            raise NotImplementedError("Installed adata package does not expose Shenwan industry data")
+        kwargs = {"stock_code": _security_code(security)}
+        if query_date is not None:
+            kwargs["date"] = query_date.strftime("%Y-%m-%d")
+        try:
+            raw = method(**kwargs)
+        except TypeError:
+            raw = method(stock_code=_security_code(security))
+        return _jq_industry_payload(raw)
+
+    def _etf_unit_net_values(self, securities: list[str]) -> dict[str, Any]:
+        raw = self.adata.fund.info.all_etf_exchange_traded_info()
+        if raw is None or raw.empty:
+            return {}
+        code_column = next((column for column in ("fund_code", "code", "security") if column in raw.columns), None)
+        value_column = next((column for column in ("unit_net_value", "net_value", "nav", "iopv") if column in raw.columns), None)
+        if code_column is None or value_column is None:
+            raise NotImplementedError("Installed adata ETF metadata does not expose unit net value")
+        values = {}
+        for row in raw.itertuples(index=False):
+            jq_code = _jq_code(str(getattr(row, code_column)))
+            if jq_code in securities:
+                values[jq_code] = _float_or_none(getattr(row, value_column))
+        return values
 
     def _all_stock_securities(self) -> pd.DataFrame:
         raw = self.adata.stock.info.all_code()
@@ -376,10 +425,16 @@ class ADataMarketDataProvider(MarketDataProvider):
             security=security,
             paused=paused,
             last_price=_float_or_none(price),
+            high=_float_or_none(_row_get(row, "high")),
+            low=_float_or_none(_row_get(row, "low")),
             high_limit=_float_or_none(_row_get(row, "high_limit")),
             low_limit=_float_or_none(_row_get(row, "low_limit")),
             is_st=_bool_or_none(_first_row_value(row, "is_st", "st")),
             day_open=_float_or_none(_first_row_value(row, "day_open", "open")),
+            pre_close=_float_or_none(_row_get(row, "pre_close")),
+            volume=_float_or_none(volume),
+            money=_float_or_none(_first_row_value(row, "money", "amount")),
+            avg_price=_float_or_none(_first_row_value(row, "avg_price", "avg")),
             name=_first_row_value(row, "name", "short_name"),
             industry_code=_row_get(row, "industry_code"),
         )
@@ -387,6 +442,7 @@ class ADataMarketDataProvider(MarketDataProvider):
 
 _STANDARD_FIELDS = ["open", "close", "high", "low", "volume", "money"]
 _MULTI_PERIOD_FIELDS = set(_STANDARD_FIELDS)
+_EXTRA_FIELDS = {"is_st", "acc_net_value", "unit_net_value", "futures_sett_price", "futures_positions", "adj_net_value"}
 
 
 def _security_code(security: str) -> str:
@@ -653,6 +709,47 @@ def _row_get(row: Any, key: str, default=None):
 
 def _none_if_nan(value):
     return None if value is None or pd.isna(value) else value
+
+
+def _extras_index(start_date=None, end_date=None, count=None):
+    if count is not None:
+        end = pd.to_datetime(end_date).date() if end_date is not None else date.today()
+        return pd.date_range(end=end, periods=count, freq="D")
+    if start_date is None and end_date is None:
+        return pd.DatetimeIndex([pd.Timestamp(date.today())])
+    start = pd.to_datetime(start_date if start_date is not None else end_date)
+    end = pd.to_datetime(end_date if end_date is not None else start_date)
+    return pd.date_range(start=start, end=end, freq="D")
+
+
+def _jq_industry_payload(raw) -> dict:
+    if raw is None:
+        return {}
+    if isinstance(raw, dict):
+        if "sw_l2" in raw:
+            return raw
+        name = raw.get("industry_name") or raw.get("name")
+        code = raw.get("industry_code") or raw.get("code")
+        return {"sw_l2": {"industry_name": name, "industry_code": code}}
+    if not isinstance(raw, pd.DataFrame) or raw.empty:
+        return {}
+    data = raw.copy()
+    level_column = next((column for column in ("level", "industry_level", "type", "industry_type") if column in data.columns), None)
+    name_column = next((column for column in ("industry_name", "name", "block_name") if column in data.columns), None)
+    code_column = next((column for column in ("industry_code", "code", "block_code") if column in data.columns), None)
+    if name_column is None:
+        return {}
+    payload = {}
+    for index, row in enumerate(data.itertuples(index=False), 1):
+        level_value = str(getattr(row, level_column)) if level_column is not None else str(index)
+        key = "sw_l2" if "2" in level_value or "二" in level_value or index == 2 else "sw_l1" if index == 1 else f"sw_l{index}"
+        payload[key] = {
+            "industry_name": getattr(row, name_column),
+            "industry_code": getattr(row, code_column) if code_column is not None else None,
+        }
+    if "sw_l2" not in payload and payload:
+        payload["sw_l2"] = next(iter(payload.values()))
+    return payload
 
 
 def _parse_date(value) -> date | None:
