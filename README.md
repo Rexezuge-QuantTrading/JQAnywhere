@@ -47,6 +47,7 @@ JQAnywhere is a compatibility runtime, not a strategy-adapter framework. User st
 - `run_daily(func, "09:50")`
 - strategy state stored on `g`
 - orders sent through JoinQuant-style functions such as `order_target_value`
+- technical indicators imported from the full `talib` package
 
 Internally, JQAnywhere separates runtime concerns:
 
@@ -107,6 +108,7 @@ Supported In v0.6
 - config validation through `jqanywhere config validate --config ...`
 - operational config/provider checks through `jqanywhere doctor --config ...`
 - API surface inspection through `jqanywhere list-api`
+- full `talib` package imports for copied strategies
 - LocalStack endpoint support through `AWS_ENDPOINT_URL`
 
 AData Provider
@@ -213,7 +215,7 @@ The repository includes `serverless.yml` with:
 
 - Lambda handler: `src/jqanywhere/runtime/lambda_handler.run` for the packaged `src/**` layout
 - EventBridge schedule
-- Serverless Framework v4 Python requirements packaging for pandas, numpy, adata, and other Python dependencies
+- Serverless Framework v4 Python requirements packaging for pandas, numpy, adata, TA-Lib, and other Python dependencies
 - CI-generated `requirements.txt` from `pyproject.toml` for Lambda dependency packaging
 - reserved Lambda concurrency defaulting to `1` to reduce overlapping scheduled runs
 - CloudWatch log retention through `LOG_RETENTION_DAYS`
