@@ -6,7 +6,7 @@ import hashlib
 from typing import Any
 
 from jqanywhere.broker.base import Broker
-from jqanywhere.jqcompat.types import Context, LimitOrderStyle, Order, Position
+from jqanywhere.jqcompat.types import Context, LimitOrderStyle, Order, OrderStatus, Position
 
 
 class RemoteMiniQmtBroker(Broker):
@@ -97,11 +97,11 @@ def _client_order_id(context: Context, strategy_name: str, method: str, security
 
 
 def _order_from_response(context: Context, security: str, response: dict[str, Any]) -> Order:
-    status = str(response.get("status", "submitted"))
+    status = _order_status(response.get("status", "open"))
     amount = int(response.get("amount", response.get("filled_amount", 0)) or 0)
     price = float(response.get("price", 0.0) or 0.0)
     value = float(response.get("value", abs(amount) * price) or 0.0)
-    filled_amount = int(response.get("filled_amount", amount if status in {"filled", "succeeded", "completed"} else 0) or 0)
+    filled_amount = int(response.get("filled_amount", amount if status is OrderStatus.filled else 0) or 0)
     return Order(
         security=response.get("security", security),
         amount=amount,
@@ -114,7 +114,18 @@ def _order_from_response(context: Context, security: str, response: dict[str, An
         avg_cost=float(response.get("avg_cost", response.get("avg_price", price)) or 0.0),
         reason=response.get("reason"),
         add_time=context.current_dt,
+        is_buy=amount >= 0,
+        order_id=response.get("order_id", response.get("broker_order_id")),
+        side=response.get("side", "long"),
+        action=response.get("action", "open" if amount >= 0 else "close"),
     )
+
+
+def _order_status(value) -> OrderStatus:
+    text = str(value).lower()
+    aliases = {"submitted": "open", "succeeded": "filled", "completed": "filled", "cancelled": "canceled"}
+    text = aliases.get(text, text)
+    return OrderStatus.__members__.get(text, OrderStatus.open)
 
 
 def _record_order(
@@ -132,7 +143,7 @@ def _record_order(
             "value": order.value,
             "price": order.price,
             "filled": order.filled,
-            "status": order.status,
+            "status": order.status.name if isinstance(order.status, OrderStatus) else str(order.status),
             "filled_amount": order.filled_amount,
             "commission": order.commission,
             "reason": order.reason,

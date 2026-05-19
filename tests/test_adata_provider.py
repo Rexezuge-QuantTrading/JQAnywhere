@@ -322,20 +322,25 @@ def test_adata_get_security_info_returns_metadata_object(monkeypatch):
 
 
 def test_adata_get_industry_maps_sw_payload(monkeypatch):
-    stock_info = types.SimpleNamespace(
-        get_industry_sw=lambda **kwargs: pd.DataFrame(
+    calls = []
+
+    def get_industry_sw(**kwargs):
+        calls.append(kwargs)
+        return pd.DataFrame(
             {
                 "industry_level": ["一级", "二级"],
                 "industry_code": ["801000", "801780"],
                 "industry_name": ["金融", "银行"],
             }
         )
-    )
+
+    stock_info = types.SimpleNamespace(get_industry_sw=get_industry_sw)
     _install_adata(monkeypatch, stock_info=stock_info)
 
-    result = ADataMarketDataProvider().get_industry(["000001.XSHE"])
+    result = ADataMarketDataProvider().get_industry(["000001.XSHE"], date="2026-05-15")
 
     assert result["000001.XSHE"]["sw_l2"]["industry_name"] == "银行"
+    assert calls == [{"stock_code": "000001", "date": "2026-05-15"}]
 
 
 def test_adata_get_extras_maps_etf_unit_net_value(monkeypatch):
@@ -345,6 +350,21 @@ def test_adata_get_extras_maps_etf_unit_net_value(monkeypatch):
     result = ADataMarketDataProvider().get_extras("unit_net_value", "510300.XSHG", start_date="2026-05-15", end_date="2026-05-15")
 
     assert result.loc[pd.Timestamp("2026-05-15"), "510300.XSHG"] == 4.25
+
+
+def test_adata_get_extras_validates_official_fields(monkeypatch):
+    fund_info = types.SimpleNamespace(all_etf_exchange_traded_info=lambda: pd.DataFrame({"fund_code": ["510300"], "net_value": [4.25]}))
+    _install_adata(monkeypatch, fund_info=fund_info)
+    provider = ADataMarketDataProvider()
+
+    result = provider.get_extras("acc_net_value", "510300.XSHG", count=1)
+
+    with pytest.raises(NotImplementedError, match="futures_sett_price"):
+        provider.get_extras("futures_sett_price", "IF9999.CCFX", count=1)
+    with pytest.raises(NotImplementedError, match="net_value"):
+        provider.get_extras("net_value", "510300.XSHG", count=1)
+
+    assert result.iloc[-1, 0] == 4.25
 
 
 def test_adata_get_trade_days_filters_calendar(monkeypatch):

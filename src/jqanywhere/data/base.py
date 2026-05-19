@@ -133,7 +133,7 @@ class MarketDataProvider(ABC):
         """Return fundamentals for a JoinQuant-style query object."""
         raise NotImplementedError("JQAnywhere v0.7 does not implement get_fundamentals for this data provider")
 
-    def get_valuation(self, security, end_date=None, fields=None, count=1):
+    def get_valuation(self, security, start_date=None, end_date=None, fields=None, count=None):
         """Return valuation fields for one or more securities."""
         raise NotImplementedError("JQAnywhere v0.7 does not implement get_valuation for this data provider")
 
@@ -223,13 +223,18 @@ class StaticMarketDataProvider(MarketDataProvider):
     def get_fundamentals(self, query, date=None, statDate=None):
         return _run_fundamentals_query(self.fundamentals, query)
 
-    def get_valuation(self, security, end_date=None, fields=None, count=1):
+    def get_valuation(self, security, start_date=None, end_date=None, fields=None, count=None):
         securities = [security] if isinstance(security, str) else list(security)
-        field_list = _field_list(fields or ["capitalization", "circulating_cap", "market_cap", "circulating_market_cap"])
+        field_list = _field_list(fields or _VALUATION_FIELDS)
         data = _fundamentals_with_code(self.fundamentals)
         if data.empty:
             return pd.DataFrame(columns=field_list)
         data = data[data["code"].isin(securities)] if "code" in data.columns else data.iloc[0:0]
+        if "day" in data.columns:
+            if start_date is not None:
+                data = data[pd.to_datetime(data["day"]) >= pd.to_datetime(start_date)]
+            if end_date is not None:
+                data = data[pd.to_datetime(data["day"]) <= pd.to_datetime(end_date)]
         if count is not None:
             data = data.tail(count * max(len(securities), 1))
         for field in field_list:
@@ -302,6 +307,22 @@ def _field_list(fields) -> list[str]:
     return [fields] if isinstance(fields, str) else list(fields)
 
 
+_VALUATION_FIELDS = [
+    "code",
+    "day",
+    "capitalization",
+    "circulating_cap",
+    "market_cap",
+    "circulating_market_cap",
+    "turnover_ratio",
+    "pe_ratio",
+    "pe_ratio_lyr",
+    "pb_ratio",
+    "ps_ratio",
+    "pcf_ratio",
+]
+
+
 def _flat_price_frame(frames: dict[str, pd.DataFrame], fields: list[str]) -> pd.DataFrame:
     rows = []
     for code, frame in frames.items():
@@ -316,7 +337,7 @@ def _flat_price_frame(frames: dict[str, pd.DataFrame], fields: list[str]) -> pd.
 
 
 def _run_fundamentals_query(data: pd.DataFrame, query) -> pd.DataFrame:
-    from jqanywhere.jqcompat.query import FundamentalsQuery, QueryField
+    from jqanywhere.jqcompat.query import FundamentalsQuery, QueryField, QueryTable
 
     result = _fundamentals_with_code(data)
     if not isinstance(query, FundamentalsQuery):
@@ -339,12 +360,21 @@ def _run_fundamentals_query(data: pd.DataFrame, query) -> pd.DataFrame:
     if query.fields:
         columns = []
         for query_field in query.fields:
-            name = query_field.name if isinstance(query_field, QueryField) else str(query_field)
+            if isinstance(query_field, QueryTable):
+                continue
+            name = _query_field_column(result, query_field) if isinstance(query_field, QueryField) else str(query_field)
             if name not in result.columns:
                 result[name] = pd.NA
             columns.append(name)
-        result = result[columns]
+        if columns:
+            result = result[columns]
     return result.reset_index(drop=True)
+
+
+def _query_field_column(data: pd.DataFrame, field) -> str:
+    if field.full_name in data.columns:
+        return field.full_name
+    return field.name
 
 
 def _fundamentals_with_code(data: pd.DataFrame) -> pd.DataFrame:

@@ -7,7 +7,7 @@ from typing import Any
 
 import pandas as pd
 
-from jqanywhere.data.base import MarketDataProvider, _filter_trade_days, _flat_price_frame
+from jqanywhere.data.base import _VALUATION_FIELDS, MarketDataProvider, _filter_trade_days, _flat_price_frame
 from jqanywhere.jqcompat.types import CurrentData, SecurityInfo
 
 
@@ -90,12 +90,18 @@ class RemoteMiniQmtMarketDataProvider(MarketDataProvider):
         )
         return pd.DataFrame(response.get("rows", response.get("data", [])))
 
-    def get_valuation(self, security, end_date=None, fields=None, count=1):
+    def get_valuation(self, security, start_date=None, end_date=None, fields=None, count=None):
         securities = [security] if isinstance(security, str) else list(security)
-        field_list = _field_list(fields or ["capitalization", "circulating_cap", "market_cap", "circulating_market_cap"])
+        field_list = _field_list(fields or _VALUATION_FIELDS)
         response = self.client.post(
             "/v1/market/valuation",
-            {"securities": securities, "end_date": _date_value(end_date), "fields": field_list, "count": count},
+            {
+                "securities": securities,
+                "start_date": _date_value(start_date),
+                "end_date": _date_value(end_date),
+                "fields": field_list,
+                "count": count,
+            },
         )
         data = pd.DataFrame(response.get("rows", response.get("data", [])))
         for field in field_list:

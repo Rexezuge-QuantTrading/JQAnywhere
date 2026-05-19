@@ -391,6 +391,108 @@ def test_history_and_order_status_match_joinquant_style(tmp_path):
     assert result["orders"][1]["filled"] == 10
 
 
+def test_history_defaults_to_avg_and_keeps_datetime_index(tmp_path):
+    strategy_path = tmp_path / "history_defaults_strategy.py"
+    strategy_path.write_text(
+        "from jqdata import *\n"
+        "\n"
+        "def initialize(context):\n"
+        "    run_daily(trade, '09:50')\n"
+        "\n"
+        "def trade(context):\n"
+        "    prices = history(1, security_list=['000001.XSHE'])\n"
+        "    g.columns = list(prices.columns)\n"
+        "    g.index = str(prices.index[0].date())\n"
+        "    g.value = float(prices['000001.XSHE'].iloc[0])\n",
+        encoding="utf-8",
+    )
+    data = StaticMarketDataProvider(
+        history={"000001.XSHE": pd.DataFrame({"avg": [10.5]}, index=pd.to_datetime(["2026-05-15"]))},
+        current=["000001.XSHE"],
+    )
+    engine = RuntimeEngine(
+        strategy_id="history_defaults",
+        strategy_path=strategy_path,
+        data=data,
+        broker=PaperBroker(),
+        state_store=MemoryStateStore(),
+        notifier=ConsoleNotifier(),
+        initial_cash=1_000,
+    )
+
+    result = engine.run(now=datetime(2026, 5, 18, 9, 50))
+
+    assert result["state"] == {"columns": ["000001.XSHE"], "index": "2026-05-15", "value": 10.5}
+
+
+def test_fundamentals_query_equality_table_projection_and_reuse(tmp_path):
+    strategy_path = tmp_path / "query_regression_strategy.py"
+    strategy_path.write_text(
+        "from jqdata import *\n"
+        "\n"
+        "def initialize(context):\n"
+        "    run_daily(scan, '09:50')\n"
+        "\n"
+        "def scan(context):\n"
+        "    base = query(valuation.code, valuation.market_cap)\n"
+        "    q1 = base.filter(valuation.code == '000001.XSHE')\n"
+        "    q2 = base.filter(valuation.code == '000002.XSHE')\n"
+        "    g.pick1 = get_fundamentals(q1).code.iloc[0]\n"
+        "    g.pick2 = get_fundamentals(q2).code.iloc[0]\n"
+        "    table_df = get_fundamentals(query(valuation))\n"
+        "    g.table_columns = list(table_df.columns)\n",
+        encoding="utf-8",
+    )
+    fundamentals = pd.DataFrame(
+        [
+            {"code": "000001.XSHE", "market_cap": 20.0},
+            {"code": "000002.XSHE", "market_cap": 10.0},
+        ]
+    )
+    engine = RuntimeEngine(
+        strategy_id="query_regression",
+        strategy_path=strategy_path,
+        data=StaticMarketDataProvider(fundamentals=fundamentals),
+        broker=PaperBroker(),
+        state_store=MemoryStateStore(),
+        notifier=ConsoleNotifier(),
+        initial_cash=100_000,
+    )
+
+    result = engine.run(now=datetime(2026, 5, 18, 9, 50))
+
+    assert result["state"] == {"pick1": "000001.XSHE", "pick2": "000002.XSHE", "table_columns": ["code", "market_cap"]}
+
+
+def test_get_valuation_supports_official_signature_defaults_and_dates():
+    fundamentals = pd.DataFrame(
+        [
+            {"code": "000001.XSHE", "day": "2026-05-14", "market_cap": 10.0},
+            {"code": "000001.XSHE", "day": "2026-05-15", "market_cap": 11.0},
+        ]
+    )
+    data = StaticMarketDataProvider(fundamentals=fundamentals)
+
+    result = data.get_valuation("000001.XSHE", start_date="2026-05-15", end_date="2026-05-15")
+
+    assert list(result.columns) == [
+        "code",
+        "day",
+        "capitalization",
+        "circulating_cap",
+        "market_cap",
+        "circulating_market_cap",
+        "turnover_ratio",
+        "pe_ratio",
+        "pe_ratio_lyr",
+        "pb_ratio",
+        "ps_ratio",
+        "pcf_ratio",
+    ]
+    assert result["day"].tolist() == ["2026-05-15"]
+    assert result["market_cap"].tolist() == [11.0]
+
+
 def test_paper_broker_uses_asset_type_specific_costs_and_slippage(tmp_path):
     strategy_path = tmp_path / "asset_cost_strategy.py"
     strategy_path.write_text(
@@ -423,6 +525,81 @@ def test_paper_broker_uses_asset_type_specific_costs_and_slippage(tmp_path):
 
     assert result["orders"][0]["price"] == 10.1
     assert result["orders"][0]["commission"] == 0
+
+
+def test_paper_broker_uses_ref_slippage_and_close_today_commission(tmp_path):
+    strategy_path = tmp_path / "ref_cost_strategy.py"
+    strategy_path.write_text(
+        "from jqdata import *\n"
+        "\n"
+        "def initialize(context):\n"
+        "    set_slippage(PriceRelatedSlippage(0.1), ref='000001.XSHE')\n"
+        "    set_order_cost(OrderCost(close_commission=0.01, close_today_commission=0.02), ref='000001.XSHE')\n"
+        "    run_daily(trade, '09:50')\n"
+        "\n"
+        "def trade(context):\n"
+        "    order_target_value('000001.XSHE', 100)\n"
+        "    order_target_value('000001.XSHE', 0, close_today=True)\n",
+        encoding="utf-8",
+    )
+    data = StaticMarketDataProvider(current=["000001.XSHE"])
+    data.current["000001.XSHE"].last_price = 10.0
+    engine = RuntimeEngine(
+        strategy_id="ref_cost",
+        strategy_path=strategy_path,
+        data=data,
+        broker=PaperBroker(),
+        state_store=MemoryStateStore(),
+        notifier=ConsoleNotifier(),
+        initial_cash=1_000,
+    )
+
+    result = engine.run(now=datetime(2026, 5, 18, 9, 50))
+
+    assert result["orders"][0]["price"] == 11.0
+    assert result["orders"][1]["price"] == 9.0
+    assert result["orders"][1]["commission"] == 1.8
+    assert result["orders"][1]["status"] == "held"
+
+
+def test_order_management_apis_are_available(tmp_path):
+    strategy_path = tmp_path / "order_management_strategy.py"
+    strategy_path.write_text(
+        "from jqdata import *\n"
+        "\n"
+        "def initialize(context):\n"
+        "    run_daily(trade, '09:50')\n"
+        "\n"
+        "def trade(context):\n"
+        "    order = order_target_value('000001.XSHE', 100)\n"
+        "    g.order_id = order.order_id\n"
+        "    g.orders_count = len(get_orders())\n"
+        "    g.security_orders_count = len(get_orders(security='000001.XSHE'))\n"
+        "    g.open_orders_count = len(get_open_orders())\n"
+        "    g.trades_count = len(get_trades())\n",
+        encoding="utf-8",
+    )
+    data = StaticMarketDataProvider(current=["000001.XSHE"])
+    data.current["000001.XSHE"].last_price = 10.0
+    engine = RuntimeEngine(
+        strategy_id="order_management",
+        strategy_path=strategy_path,
+        data=data,
+        broker=PaperBroker(),
+        state_store=MemoryStateStore(),
+        notifier=ConsoleNotifier(),
+        initial_cash=1_000,
+    )
+
+    result = engine.run(now=datetime(2026, 5, 18, 9, 50))
+
+    assert result["state"] == {
+        "order_id": "paper-1",
+        "orders_count": 1,
+        "security_orders_count": 1,
+        "open_orders_count": 0,
+        "trades_count": 0,
+    }
 
 
 def test_paper_broker_marks_positions_to_current_price_across_runs(tmp_path):

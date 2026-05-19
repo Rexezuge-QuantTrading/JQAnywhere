@@ -2,7 +2,7 @@ from datetime import datetime
 
 from jqanywhere.broker.remote_miniqmt import RemoteMiniQmtBroker
 from jqanywhere.data.remote_miniqmt import RemoteMiniQmtMarketDataProvider
-from jqanywhere.jqcompat.types import Context, Portfolio
+from jqanywhere.jqcompat.types import Context, OrderStatus, Portfolio
 
 
 class FakeMiniQmtClient:
@@ -68,7 +68,8 @@ def test_remote_miniqmt_broker_syncs_portfolio_and_submits_idempotent_order():
 
     assert context.portfolio.available_cash == 1234.5
     assert context.portfolio.positions["000001.XSHE"].total_amount == 200
-    assert order.status == "submitted"
+    assert order.status is OrderStatus.open
+    assert context.order_history[0]["status"] == "open"
     assert context.order_history[0]["client_order_id"].startswith("jq")
     assert client.requests[-1][2]["method"] == "order_target_value"
 

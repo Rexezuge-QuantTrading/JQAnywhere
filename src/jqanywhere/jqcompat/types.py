@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
+from enum import Enum
 from typing import Any
 
 
@@ -15,10 +16,26 @@ class OrderCost:
     close_commission: float = 0.0
     close_today_commission: float = 0.0
     min_commission: float = 0.0
+    type: str | None = None
+    ref: str | None = None
+
+
+class BaseSlippage:
+    pass
 
 
 @dataclass
-class FixedSlippage:
+class FixedSlippage(BaseSlippage):
+    value: float = 0.0
+
+
+@dataclass
+class PriceRelatedSlippage(BaseSlippage):
+    value: float = 0.0
+
+
+@dataclass
+class StepRelatedSlippage(BaseSlippage):
     value: float = 0.0
 
 
@@ -110,13 +127,13 @@ class SecurityInfo:
     type: str | None = None
 
 
-class OrderStatus:
-    held = "held"
-    filled = held
-    rejected = "rejected"
-    canceled = "canceled"
-    submitted = "submitted"
-    open = "open"
+class OrderStatus(Enum):
+    new = 8
+    open = 0
+    filled = 1
+    canceled = 2
+    rejected = 3
+    held = 4
 
 
 @dataclass
@@ -126,9 +143,13 @@ class Order:
     value: float
     price: float
     filled: int = 0
-    status: str = OrderStatus.held
+    status: OrderStatus = OrderStatus.held
     filled_amount: int | None = None
     commission: float = 0.0
     avg_cost: float = 0.0
     reason: str | None = None
     add_time: datetime | None = None
+    is_buy: bool = True
+    order_id: str | None = None
+    side: str = "long"
+    action: str = "open"

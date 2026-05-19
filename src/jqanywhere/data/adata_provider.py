@@ -172,14 +172,20 @@ class ADataMarketDataProvider(MarketDataProvider):
         )
 
     def get_industry(self, security, date=None):
+        query_date = _coerce_date(date) if date is not None else None
         securities = [security] if isinstance(security, str) else list(security)
-        return {code: self._industry_for_security(code) for code in securities}
+        return {code: self._industry_for_security(code, query_date) for code in securities}
 
     def get_extras(self, info, security_list, start_date=None, end_date=None, df=True, count=None):
-        if info not in {"unit_net_value", "net_value"}:
+        if info not in _EXTRA_FIELDS:
             raise NotImplementedError(f"AData does not expose extras field: {info}")
         securities = [security_list] if isinstance(security_list, str) else list(security_list)
-        values = self._etf_unit_net_values(securities)
+        if info == "is_st":
+            values = {code: self.get_current_data()[code].is_st for code in securities}
+        elif info in {"unit_net_value", "acc_net_value", "adj_net_value"}:
+            values = self._etf_unit_net_values(securities)
+        else:
+            raise NotImplementedError(f"AData does not expose extras field: {info}")
         index = _extras_index(start_date, end_date, count)
         result = pd.DataFrame(index=index)
         for code in securities:
@@ -202,11 +208,17 @@ class ADataMarketDataProvider(MarketDataProvider):
                     frames.append(method(year))
             return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
 
-    def _industry_for_security(self, security: str) -> dict:
+    def _industry_for_security(self, security: str, query_date: date | None = None) -> dict:
         method = getattr(getattr(self.adata.stock, "info", None), "get_industry_sw", None)
         if method is None:
             raise NotImplementedError("Installed adata package does not expose Shenwan industry data")
-        raw = method(stock_code=_security_code(security))
+        kwargs = {"stock_code": _security_code(security)}
+        if query_date is not None:
+            kwargs["date"] = query_date.strftime("%Y-%m-%d")
+        try:
+            raw = method(**kwargs)
+        except TypeError:
+            raw = method(stock_code=_security_code(security))
         return _jq_industry_payload(raw)
 
     def _etf_unit_net_values(self, securities: list[str]) -> dict[str, Any]:
@@ -430,6 +442,7 @@ class ADataMarketDataProvider(MarketDataProvider):
 
 _STANDARD_FIELDS = ["open", "close", "high", "low", "volume", "money"]
 _MULTI_PERIOD_FIELDS = set(_STANDARD_FIELDS)
+_EXTRA_FIELDS = {"is_st", "acc_net_value", "unit_net_value", "futures_sett_price", "futures_positions", "adj_net_value"}
 
 
 def _security_code(security: str) -> str:

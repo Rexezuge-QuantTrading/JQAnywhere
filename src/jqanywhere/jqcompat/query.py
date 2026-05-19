@@ -53,7 +53,7 @@ class _Evaluable:
         return self._binary(other, lambda left, right: left != right, "!=")
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, eq=False)
 class QueryField(_Evaluable):
     table: str
     name: str
@@ -63,10 +63,10 @@ class QueryField(_Evaluable):
         return f"{self.table}.{self.name}"
 
     def evaluate(self, data: pd.DataFrame):
-        if self.name in data.columns:
-            return data[self.name]
         if self.full_name in data.columns:
             return data[self.full_name]
+        if self.name in data.columns:
+            return data[self.name]
         if self.name == "code" and data.index.name == "code":
             return data.index.to_series(index=data.index)
         return pd.Series(pd.NA, index=data.index)
@@ -107,18 +107,30 @@ class FundamentalsQuery:
     limit_count: int | None = None
 
     def filter(self, *conditions) -> FundamentalsQuery:
-        self.conditions.extend(condition for condition in conditions if condition is not None)
-        return self
+        return FundamentalsQuery(
+            fields=self.fields,
+            conditions=[*self.conditions, *(condition for condition in conditions if condition is not None)],
+            sort_keys=list(self.sort_keys),
+            limit_count=self.limit_count,
+        )
 
     def order_by(self, *keys) -> FundamentalsQuery:
-        self.sort_keys.extend(key if isinstance(key, SortKey) else SortKey(key) for key in keys)
-        return self
+        return FundamentalsQuery(
+            fields=self.fields,
+            conditions=list(self.conditions),
+            sort_keys=[*self.sort_keys, *(key if isinstance(key, SortKey) else SortKey(key) for key in keys)],
+            limit_count=self.limit_count,
+        )
 
     def limit(self, count: int) -> FundamentalsQuery:
         if not isinstance(count, int) or count < 0:
             raise ValueError("query limit must be a non-negative integer")
-        self.limit_count = count
-        return self
+        return FundamentalsQuery(
+            fields=self.fields,
+            conditions=list(self.conditions),
+            sort_keys=list(self.sort_keys),
+            limit_count=count,
+        )
 
 
 class QueryTable:
@@ -127,6 +139,9 @@ class QueryTable:
 
     def __getattr__(self, name: str) -> QueryField:
         return QueryField(self.name, name)
+
+    def __str__(self) -> str:
+        return self.name
 
 
 def query(*fields) -> FundamentalsQuery:
