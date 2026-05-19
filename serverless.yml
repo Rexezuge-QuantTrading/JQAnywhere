@@ -1,7 +1,6 @@
 service: jqanywhere
 
 plugins:
-  - serverless-python-requirements
   - serverless-localstack
 
 provider:
