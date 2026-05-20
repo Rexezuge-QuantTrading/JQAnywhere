@@ -1,7 +1,7 @@
 JQAnywhere
 ==========
 
-JQAnywhere is an MIT-licensed live-trading runtime for running JoinQuant-style strategies on AWS-compatible infrastructure. The goal is to let users copy a supported JoinQuant strategy file unchanged, keep `from jqdata import *`, and run it locally, on AWS, or on LocalStack as an event-driven paper or live trading process.
+JQAnywhere is an MIT-licensed live-trading runtime for running JoinQuant-style strategies on AWS-compatible infrastructure. The goal is to let users copy a supported JoinQuant strategy file unchanged, keep `from jqdata import *`, and run it locally, on AWS, or on an AWS-compatible emulator as an event-driven paper or live trading process.
 
 Status: v0.8.0 alpha.
 
@@ -135,7 +135,7 @@ Supported In v0.8.0
 - API surface inspection through `jqanywhere list-api`
 - full `talib` package imports for copied strategies
 - import-compatible `jqfactor` package stubs for factor APIs that still fail explicitly when called
-- LocalStack endpoint support through `AWS_ENDPOINT_URL`
+- AWS-compatible emulator endpoint support through `AWS_ENDPOINT_URL`
 
 AData Provider
 --------------
@@ -250,7 +250,7 @@ The repository includes `serverless.yml` with:
 - CloudWatch log retention through `LOG_RETENTION_DAYS`
 - DynamoDB state table
 - SNS topic
-- Floci-compatible local AWS emulator deployment through the `serverless-localstack` endpoint plugin
+- Floci-compatible local AWS emulator deployment through Serverless local-stage endpoint configuration
 - package exclusions for `.venv`, `tests`, and `private` by default
 
 GitHub Actions runs a Serverless smoke test against [Floci](https://github.com/floci-io/floci): it starts `floci/floci`, deploys the stack with Serverless Framework v4, verifies the Lambda/DynamoDB/SNS resources, and invokes the deployed `runner` Lambda. The workflow expects `SERVERLESS_LICENSE_KEY` to be configured as a GitHub secret for Serverless v4. `JQANYWHERE_AWS_ENDPOINT_URL` can override the `AWS_ENDPOINT_URL` injected into Lambda while host-side tools still use `AWS_ENDPOINT_URL`.
