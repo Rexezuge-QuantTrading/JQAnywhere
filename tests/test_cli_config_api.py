@@ -4,7 +4,7 @@ import pytest
 
 from jqanywhere.cli import main
 from jqanywhere.config import load_config
-from jqanywhere.jqcompat.api import before_trading_start, finance, handle_data, macro
+from jqanywhere.jqcompat.api import before_trading_start, finance, get_ticks, handle_data, macro, marginsec_open, normalize_code
 
 
 def test_config_rejects_unknown_provider(tmp_path):
@@ -81,8 +81,8 @@ def test_cli_run_json_outputs_valid_json(tmp_path, capsys):
 
 
 def test_documented_unsupported_surfaces_are_explicit():
-    for func in (handle_data, before_trading_start, finance.run_query, macro.run_query):
-        with pytest.raises(NotImplementedError, match="v0.8.0"):
+    for func in (handle_data, before_trading_start, finance.run_query, macro.run_query, get_ticks, normalize_code, marginsec_open):
+        with pytest.raises(NotImplementedError, match="v0.9.0"):
             func(None)
 
 

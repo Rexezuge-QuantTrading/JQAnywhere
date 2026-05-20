@@ -162,6 +162,14 @@ def test_adata_attribute_history_rejects_invalid_contract_inputs(monkeypatch):
         provider.attribute_history("000001.XSHE", 1, "2d", ["factor"], True, True, "pre")
 
 
+def test_adata_attribute_history_rejects_missing_joinquant_fields(monkeypatch):
+    market = types.SimpleNamespace(get_market=lambda **kwargs: _stock_history())
+    _install_adata(monkeypatch, stock_market=market)
+
+    with pytest.raises(NotImplementedError, match="open_interest"):
+        ADataMarketDataProvider().attribute_history("000001.XSHE", 1, "1d", ["open_interest"], False, True, "pre")
+
+
 def test_adata_attribute_history_synthesizes_sliding_multi_period_bars(monkeypatch):
     market = types.SimpleNamespace(get_market=lambda **kwargs: _stock_history())
     _install_adata(monkeypatch, stock_market=market)

@@ -23,8 +23,10 @@ SUPPORTED_API = [
     "get_all_securities, get_security_info, get_trade_days, get_all_trade_days",
     "query, valuation, balance, cash_flow, income, indicator, get_fundamentals where provider supports fundamentals",
     "get_valuation, get_industry, get_extras where provider supports those datasets",
-    "record, OrderStatus, context.run_params including v0.8.0 end_date shim",
+    "record, OrderStatus, context.run_params including v0.9.0 end_date shim",
     "order, order_target, order_value, order_target_value",
+    "set_universe and disable_cache",
+    "official unsupported JoinQuant API names as explicit NotImplementedError stubs",
     "jqanywhere doctor",
 ]
 
@@ -32,6 +34,10 @@ UNSUPPORTED_API = [
     "handle_data",
     "finance.run_query",
     "macro.run_query",
+    "tick data APIs",
+    "get_trades",
+    "concept, billboard, locked-shares, and call-auction data APIs",
+    "research/backtest orchestration, file/message, and profiling APIs",
     "factor APIs beyond import-compatible jqfactor stubs",
     "portfolio optimizer",
     "internal tick/minute event loops; every_bar requires external per-minute invocations",
@@ -54,7 +60,7 @@ def main(argv: list[str] | None = None) -> None:
     invoke_parser.add_argument("--now", default=None, help="Single event timestamp as an ISO-8601 datetime")
     invoke_parser.add_argument("--json", action="store_true", help="Print machine-readable JSON")
 
-    list_api_parser = subparsers.add_parser("list-api", help="List v0.8.0 API surface")
+    list_api_parser = subparsers.add_parser("list-api", help="List v0.9.0 API surface")
     list_api_parser.add_argument("--json", action="store_true", help="Print machine-readable JSON")
 
     doctor_parser = subparsers.add_parser("doctor", help="Check config and selected providers")

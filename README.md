@@ -3,7 +3,7 @@ JQAnywhere
 
 JQAnywhere is an MIT-licensed live-trading runtime for running JoinQuant-style strategies on AWS-compatible infrastructure. The goal is to let users copy a supported JoinQuant strategy file unchanged, keep `from jqdata import *`, and run it locally, on AWS, or on an AWS-compatible emulator as an event-driven paper or live trading process.
 
-Status: v0.8.0 alpha.
+Status: v0.9.0 alpha.
 
 JQAnywhere is designed for live trading, not backtesting. It processes one externally triggered scheduled event at a time, persists state between invocations, and sends orders to the configured paper or live broker. It does not replay historical date ranges, synthesize full intraday bar loops, or provide a portfolio simulator for research/backtest performance analysis.
 
@@ -70,7 +70,7 @@ Internally, JQAnywhere separates runtime concerns:
 - `jqanywhere.persistence`: state stores such as memory and DynamoDB
 - `jqanywhere.notifications`: console and SNS notifications
 
-Supported In v0.8.0
+Supported In v0.9.0
 -------------------
 
 - `initialize(context)`
@@ -84,13 +84,15 @@ Supported In v0.8.0
 - `context.current_dt`
 - `context.previous_date` when the selected data provider exposes a trade calendar
 - `context.run_params.type` as a JoinQuant compatibility shim; the current value is not a JQAnywhere backtest mode
-- `context.run_params.end_date` as a v0.8.0 single-event compatibility shim; this is not a full JoinQuant backtest range
+- `context.run_params.end_date` as a v0.9.0 single-event compatibility shim; this is not a full JoinQuant backtest range
 - `context.run_params.frequency`
 - `set_option`
 - `set_benchmark`
 - `set_slippage`
 - `set_order_cost`
 - `set_commission`
+- `set_universe`
+- `disable_cache` as a safe no-op because JQAnywhere does not keep a JoinQuant data cache
 - `set_subportfolios` for stock/fund-style subaccounts
 - `SubPortfolioConfig`
 - `context.subportfolios`
@@ -121,7 +123,6 @@ Supported In v0.8.0
 - `cancel_order`
 - `get_open_orders`
 - `get_orders`
-- `get_trades` as an import-compatible empty trade map
 - event-driven paper-trading portfolio accounting with market-data-based fills, fixed or price-related slippage, configured commission/order cost, rejection reasons, T+1-style closeable amounts, and order history
 - `pindex`-aware paper order routing across configured subportfolios
 - persisted paper portfolio cash, subportfolio cash, positions, subaccount types, and order history
@@ -145,13 +146,14 @@ Supported In v0.8.0
 - operational config/provider checks through `jqanywhere doctor --config ...`
 - API surface inspection through `jqanywhere list-api`
 - full `talib` package imports for copied strategies
+- import-compatible official JoinQuant API stubs for unsupported APIs that fail explicitly when called
 - import-compatible `jqfactor` package stubs for factor APIs that still fail explicitly when called
 - AWS-compatible emulator endpoint support through `AWS_ENDPOINT_URL`
 
 AData Provider
 --------------
 
-Set `[data].provider = "adata"` or `JQANYWHERE_DATA_PROVIDER=adata` to use AData-backed China market data. The v0.8.0 adapter maps JoinQuant-style APIs to the real `adata 2.9.x` SDK surface:
+Set `[data].provider = "adata"` or `JQANYWHERE_DATA_PROVIDER=adata` to use AData-backed China market data. The v0.9.0 adapter maps JoinQuant-style APIs to the real `adata 2.9.x` SDK surface:
 
 - stocks: daily prices, current quotes, code metadata, and latest-day minute data where AData exposes it
 - ETFs, LOFs, and common exchange-traded fund code families: daily prices, latest-day minute data, current quotes, and ETF metadata where upstream AData exposes them
@@ -171,13 +173,18 @@ Known AData-backed limits:
 - unsupported `get_money_flow` fields fail explicitly instead of returning incomplete capital-flow data
 - `fq="pre"` is the safest stock adjustment mode; other adjustment modes depend on upstream AData behavior
 
-Unsupported In v0.8.0
+Unsupported In v0.9.0
 ---------------------
 
 These APIs are deliberately unsupported and should raise explicit `NotImplementedError` errors instead of silently doing the wrong thing:
 
 - `handle_data`
-- internal tick/minute event loops; v0.8.0 `every_bar` support depends on external per-minute invocations and does not synthesize all intraday bars inside one run
+- internal tick/minute event loops; v0.9.0 `every_bar` support depends on external per-minute invocations and does not synthesize all intraday bars inside one run
+- tick data APIs such as `get_current_tick` and `get_ticks`
+- `get_trades` until trade history is backed by exact broker/provider records
+- concept, billboard, locked-shares, call-auction, and other data APIs without exact provider backing
+- research/backtest orchestration APIs such as `create_backtest`
+- file, message, subscription, and profiling APIs
 - fundamentals/query execution when the selected provider does not implement fundamentals
 - `finance.run_query` when the selected provider does not implement exact finance tables
 - `macro.run_query`
@@ -230,7 +237,7 @@ Operational Notes
 - Runtime failures return `status="failed"` and send a failure notification containing the strategy id, event time, and exception summary.
 - Runtime failures persist `last_status="failed"`, `last_failed_at`, and `last_error`; failed scheduled runs are retryable because they do not advance `last_run_key`.
 - Unknown providers such as `[data].provider = "bad"` fail during config loading instead of silently falling back to defaults.
-- Paper trading is still a deterministic event-driven approximation. Market orders use current data or recent close when available, apply configured fixed slippage and cost settings, and reject paused or limit-blocked securities, but it is not a backtest simulator or full live broker simulator.
+- Paper trading is deterministic event-driven execution, not a JoinQuant backtest simulator or full live broker simulator. Market orders require provider-backed current data or recent close, apply configured fixed slippage and cost settings, and reject missing-price, paused, or limit-blocked securities.
 - Paper order creation failures return `None` to strategies, matching JoinQuant-style failure checks, while rejected order details remain in returned run history for diagnostics.
 - Paper portfolios mark persisted positions to available current or recent prices before each run so local account value reflects price movement between scheduled invocations.
 
