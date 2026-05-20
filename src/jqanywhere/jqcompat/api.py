@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pandas as pd
 
+from jqanywhere import __version__
 from jqanywhere.jqcompat.query import balance, cash_flow, income, indicator, query, valuation
 from jqanywhere.jqcompat.types import *
 from jqanywhere.runtime.state import get_session
@@ -22,6 +23,15 @@ def set_benchmark(security: str) -> None:
 
 def set_option(key: str, value) -> None:
     get_session().options[key] = value
+
+
+def set_universe(security_list: list[str]) -> None:
+    securities = [security_list] if isinstance(security_list, str) else list(security_list)
+    get_session().context.universe = securities
+
+
+def disable_cache() -> None:
+    return None
 
 
 def set_order_cost(cost: OrderCost, type="stock", ref=None) -> None:
@@ -202,7 +212,7 @@ def get_orders(order_id: str = None, security: str = None, status: OrderStatus =
 
 
 def get_trades() -> dict:
-    return {}
+    unsupported("get_trades")
 
 
 def get_price(*args, **kwargs):
@@ -238,11 +248,11 @@ def get_security_info(*args, **kwargs):
 
 
 def get_trade_days(*args, **kwargs):
-    return get_session().data.get_trade_days(*args, **kwargs)
+    return _jq_array(get_session().data.get_trade_days(*args, **kwargs))
 
 
 def get_all_trade_days(*args, **kwargs):
-    return get_session().data.get_all_trade_days(*args, **kwargs)
+    return _jq_array(get_session().data.get_all_trade_days(*args, **kwargs))
 
 
 def get_money_flow(*args, **kwargs):
@@ -262,7 +272,7 @@ def get_industry_stocks(*args, **kwargs):
 
 
 def unsupported(name: str):
-    raise NotImplementedError(f"JQAnywhere v0.8.0 does not support {name}")
+    raise NotImplementedError(f"JQAnywhere v{__version__} does not support {name}")
 
 
 def handle_data(*args, **kwargs):
@@ -321,12 +331,180 @@ def get_all_factors(*args, **kwargs):
     unsupported("factor APIs")
 
 
+def get_factor_kanban_values(*args, **kwargs):
+    unsupported("factor APIs")
+
+
 def portfolio_optimizer(*args, **kwargs):
     unsupported("portfolio optimizer")
 
 
+def get_current_tick(*args, **kwargs):
+    unsupported("tick data APIs")
+
+
+def get_ticks(*args, **kwargs):
+    unsupported("tick data APIs")
+
+
+def get_fundamentals_continuously(*args, **kwargs):
+    unsupported("get_fundamentals_continuously")
+
+
+def get_billboard_list(*args, **kwargs):
+    unsupported("get_billboard_list")
+
+
+def get_locked_shares(*args, **kwargs):
+    unsupported("get_locked_shares")
+
+
+def get_index_weights(*args, **kwargs):
+    unsupported("get_index_weights")
+
+
+def get_concept_stocks(*args, **kwargs):
+    unsupported("get_concept_stocks")
+
+
+def get_concepts(*args, **kwargs):
+    unsupported("get_concepts")
+
+
+def get_concept(*args, **kwargs):
+    unsupported("get_concept")
+
+
+def get_call_auction(*args, **kwargs):
+    unsupported("get_call_auction")
+
+
+def get_trade_day(*args, **kwargs):
+    unsupported("get_trade_day")
+
+
+def get_history_fundamentals(*args, **kwargs):
+    unsupported("get_history_fundamentals")
+
+
+def neutralize(*args, **kwargs):
+    unsupported("neutralize")
+
+
+def winsorize(*args, **kwargs):
+    unsupported("winsorize")
+
+
+def winsorize_med(*args, **kwargs):
+    unsupported("winsorize_med")
+
+
+def standardlize(*args, **kwargs):
+    unsupported("standardlize")
+
+
+def inout_cash(*args, **kwargs):
+    unsupported("inout_cash")
+
+
+def batch_submit_orders(*args, **kwargs):
+    unsupported("batch_submit_orders")
+
+
+def batch_cancel_orders(*args, **kwargs):
+    unsupported("batch_cancel_orders")
+
+
+def send_message(*args, **kwargs):
+    unsupported("send_message")
+
+
+def write_file(*args, **kwargs):
+    unsupported("write_file")
+
+
+def read_file(*args, **kwargs):
+    unsupported("read_file")
+
+
+def create_backtest(*args, **kwargs):
+    unsupported("create_backtest")
+
+
+def normalize_code(*args, **kwargs):
+    unsupported("normalize_code")
+
+
+def enable_profile(*args, **kwargs):
+    unsupported("enable_profile")
+
+
+def handle_tick(*args, **kwargs):
+    unsupported("handle_tick")
+
+
+def subscribe(*args, **kwargs):
+    unsupported("subscribe")
+
+
+def unsubscribe(*args, **kwargs):
+    unsupported("unsubscribe")
+
+
+def unsubscribe_all(*args, **kwargs):
+    unsupported("unsubscribe_all")
+
+
+def margincash_open(*args, **kwargs):
+    unsupported("margin trading")
+
+
+def margincash_close(*args, **kwargs):
+    unsupported("margin trading")
+
+
+def margincash_direct_refund(*args, **kwargs):
+    unsupported("margin trading")
+
+
+def marginsec_open(*args, **kwargs):
+    unsupported("margin trading")
+
+
+def marginsec_close(*args, **kwargs):
+    unsupported("margin trading")
+
+
+def marginsec_direct_refund(*args, **kwargs):
+    unsupported("margin trading")
+
+
+def get_margincash_stocks(*args, **kwargs):
+    unsupported("margin trading")
+
+
+def get_marginsec_stocks(*args, **kwargs):
+    unsupported("margin trading")
+
+
+def get_mtss(*args, **kwargs):
+    unsupported("margin trading")
+
+
+def get_dominant_future(*args, **kwargs):
+    unsupported("futures")
+
+
+def get_future_contracts(*args, **kwargs):
+    unsupported("futures")
+
+
 def _portfolio_securities() -> list[str]:
     return list(get_session().context.portfolio.positions)
+
+
+def _jq_array(value):
+    return np.array(value, dtype=object) if np is not None else value
 
 
 def _refresh_aggregate_portfolio() -> None:

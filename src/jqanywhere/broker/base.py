@@ -17,11 +17,11 @@ class Broker(ABC):
         raise NotImplementedError
 
     def order(self, context: Context, security: str, amount: int, **kwargs) -> Order | None:
-        raise NotImplementedError("JQAnywhere v0.8.0 only provides order via broker templates unless implemented by the selected broker")
+        raise NotImplementedError("JQAnywhere v0.9.0 only provides order via broker templates unless implemented by the selected broker")
 
     def order_target(self, context: Context, security: str, amount: int, **kwargs) -> Order | None:
         raise NotImplementedError(
-            "JQAnywhere v0.8.0 only provides order_target via broker templates unless implemented by the selected broker"
+            "JQAnywhere v0.9.0 only provides order_target via broker templates unless implemented by the selected broker"
         )
 
     def order_value(self, context: Context, security: str, value: float, **kwargs) -> Order | None:

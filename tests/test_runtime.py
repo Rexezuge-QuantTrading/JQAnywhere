@@ -9,7 +9,7 @@ import pytest
 from jqanywhere.broker.paper import PaperBroker
 from jqanywhere.data.base import EmptyMarketDataProvider, StaticMarketDataProvider
 from jqanywhere.jqcompat.query import indicator, query, valuation
-from jqanywhere.jqcompat.types import CurrentData
+from jqanywhere.jqcompat.types import CurrentData, LimitOrderStyle
 from jqanywhere.notifications.console import ConsoleNotifier
 from jqanywhere.persistence.memory import MemoryStateStore
 from jqanywhere.runtime.engine import RuntimeEngine
@@ -35,7 +35,7 @@ def test_simple_strategy_runs():
 
 
 def test_unsupported_fundamentals_is_explicit():
-    with pytest.raises(NotImplementedError, match="v0.8.0"):
+    with pytest.raises(NotImplementedError, match="v0.9.0"):
         EmptyMarketDataProvider().get_fundamentals(None)
 
 
@@ -44,7 +44,8 @@ def test_strategy_import_dependencies_are_available():
     PrettyTable = importlib.import_module("prettytable").PrettyTable
     talib = importlib.import_module("talib")
 
-    assert jqfactor.__all__ == ["get_all_factors", "get_factor_values", "get_factors"]
+    assert jqfactor.__all__ == ["Factor", "get_all_factors", "get_factor_values", "get_factors"]
+    assert jqfactor.Factor().dependencies == []
     high = np.array([2, 3, 4], dtype=float)
     low = np.array([1, 2, 3], dtype=float)
     close = np.array([1.5, 2.5, 3.5], dtype=float)
@@ -244,10 +245,12 @@ def test_runtime_persists_g_and_portfolio_across_runs(tmp_path):
         encoding="utf-8",
     )
     store = MemoryStateStore()
+    data = StaticMarketDataProvider(current=["000001.XSHE"])
+    data.current["000001.XSHE"].last_price = 1.0
     engine = RuntimeEngine(
         strategy_id="stateful",
         strategy_path=strategy_path,
-        data=EmptyMarketDataProvider(),
+        data=data,
         broker=PaperBroker(),
         state_store=store,
         notifier=ConsoleNotifier(),
@@ -279,10 +282,12 @@ def test_runtime_skips_duplicate_scheduled_event(tmp_path):
         encoding="utf-8",
     )
     store = MemoryStateStore()
+    data = StaticMarketDataProvider(current=["000001.XSHE"])
+    data.current["000001.XSHE"].last_price = 1.0
     engine = RuntimeEngine(
         strategy_id="duplicate",
         strategy_path=strategy_path,
-        data=EmptyMarketDataProvider(),
+        data=data,
         broker=PaperBroker(),
         state_store=store,
         notifier=ConsoleNotifier(),
@@ -855,8 +860,7 @@ def test_order_management_apis_are_available(tmp_path):
         "    g.order_id = order.order_id\n"
         "    g.orders_count = len(get_orders())\n"
         "    g.security_orders_count = len(get_orders(security='000001.XSHE'))\n"
-        "    g.open_orders_count = len(get_open_orders())\n"
-        "    g.trades_count = len(get_trades())\n",
+        "    g.open_orders_count = len(get_open_orders())\n",
         encoding="utf-8",
     )
     data = StaticMarketDataProvider(current=["000001.XSHE"])
@@ -878,8 +882,117 @@ def test_order_management_apis_are_available(tmp_path):
         "orders_count": 1,
         "security_orders_count": 1,
         "open_orders_count": 0,
-        "trades_count": 0,
     }
+
+
+def test_get_trades_fails_explicitly_until_exact_trade_history_exists(tmp_path):
+    strategy_path = tmp_path / "trades_strategy.py"
+    strategy_path.write_text(
+        "from jqdata import *\n\ndef initialize(context):\n    run_daily(trade, '09:50')\n\ndef trade(context):\n    get_trades()\n",
+        encoding="utf-8",
+    )
+    engine = RuntimeEngine(
+        strategy_id="trades",
+        strategy_path=strategy_path,
+        data=EmptyMarketDataProvider(),
+        broker=PaperBroker(),
+        state_store=MemoryStateStore(),
+        notifier=ConsoleNotifier(),
+        initial_cash=1_000,
+    )
+
+    result = engine.run(now=datetime(2026, 5, 18, 9, 50))
+
+    assert result["status"] == "failed"
+    assert result["error"] == {"type": "NotImplementedError", "message": "JQAnywhere v0.9.0 does not support get_trades"}
+
+
+def test_paper_broker_rejects_missing_price_without_fabricated_fill(tmp_path):
+    strategy_path = tmp_path / "missing_price_strategy.py"
+    strategy_path.write_text(
+        "from jqdata import *\n"
+        "\n"
+        "def initialize(context):\n"
+        "    run_daily(trade, '09:50')\n"
+        "\n"
+        "def trade(context):\n"
+        "    g.order_is_none = order_target_value('000001.XSHE', 100) is None\n",
+        encoding="utf-8",
+    )
+    engine = RuntimeEngine(
+        strategy_id="missing_price",
+        strategy_path=strategy_path,
+        data=EmptyMarketDataProvider(),
+        broker=PaperBroker(),
+        state_store=MemoryStateStore(),
+        notifier=ConsoleNotifier(),
+        initial_cash=1_000,
+    )
+
+    result = engine.run(now=datetime(2026, 5, 18, 9, 50))
+
+    assert result["state"] == {"order_is_none": True}
+    assert result["portfolio"]["available_cash"] == 1_000
+    assert result["orders"][0]["reason"] == "missing_price"
+
+
+def test_limit_order_style_accepts_official_limit_price_keyword(tmp_path):
+    strategy_path = tmp_path / "limit_order_strategy.py"
+    strategy_path.write_text(
+        "from jqdata import *\n"
+        "\n"
+        "def initialize(context):\n"
+        "    run_daily(trade, '09:50')\n"
+        "\n"
+        "def trade(context):\n"
+        "    order_target_value('000001.XSHE', 95, style=LimitOrderStyle(limit_price=9.5))\n",
+        encoding="utf-8",
+    )
+    data = StaticMarketDataProvider(current=["000001.XSHE"])
+    data.current["000001.XSHE"].last_price = 10.0
+    engine = RuntimeEngine(
+        strategy_id="limit_order",
+        strategy_path=strategy_path,
+        data=data,
+        broker=PaperBroker(),
+        state_store=MemoryStateStore(),
+        notifier=ConsoleNotifier(),
+        initial_cash=1_000,
+    )
+
+    result = engine.run(now=datetime(2026, 5, 18, 9, 50))
+
+    assert LimitOrderStyle(limit_price=9.5).price == 9.5
+    assert result["orders"][0]["price"] == 9.5
+
+
+def test_trade_days_api_returns_joinquant_numpy_array(tmp_path):
+    strategy_path = tmp_path / "trade_days_strategy.py"
+    strategy_path.write_text(
+        "from jqdata import *\n"
+        "\n"
+        "def initialize(context):\n"
+        "    run_daily(trade, '09:50')\n"
+        "\n"
+        "def trade(context):\n"
+        "    days = get_trade_days(end_date='2026-05-18', count=1)\n"
+        "    g.type_name = type(days).__name__\n"
+        "    g.day = days[0].isoformat()\n",
+        encoding="utf-8",
+    )
+    engine = RuntimeEngine(
+        strategy_id="trade_days_api",
+        strategy_path=strategy_path,
+        data=StaticMarketDataProvider(trade_days=["2026-05-15", "2026-05-18"]),
+        broker=PaperBroker(),
+        state_store=MemoryStateStore(),
+        notifier=ConsoleNotifier(),
+        initial_cash=1_000,
+    )
+
+    result = engine.run(now=datetime(2026, 5, 18, 9, 50))
+
+    assert result["state"] == {"type_name": "ndarray", "day": "2026-05-18"}
 
 
 def test_paper_broker_marks_positions_to_current_price_across_runs(tmp_path):

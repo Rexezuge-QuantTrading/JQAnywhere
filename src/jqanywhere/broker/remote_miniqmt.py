@@ -80,6 +80,8 @@ def _style_payload(style) -> dict[str, Any]:
     if isinstance(style, LimitOrderStyle):
         return {"type": "limit", "price": style.price}
     price = getattr(style, "price", None)
+    if price is None:
+        price = getattr(style, "limit_price", None)
     if price is not None:
         return {"type": "limit", "price": price}
     return {"type": "market"}

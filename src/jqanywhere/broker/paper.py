@@ -28,7 +28,7 @@ class PaperBroker(Broker):
                 if _position_last_trade_date(position) != context.current_dt.date():
                     position.closeable_amount = position.total_amount
                 price = _order_price(context, security, {})
-                if price > 0:
+                if price is not None and price > 0:
                     position.price = price
                     position.value = position.total_amount * price
         _sync_aggregate_portfolio(context)
@@ -36,14 +36,20 @@ class PaperBroker(Broker):
     def order_target_value(self, context: Context, security: str, value: float, **kwargs) -> Order | None:
         side = kwargs.get("side", "long")
         if side != "long":
-            order = _rejected_order(context, security, 0, 0.0, _order_price(context, security, kwargs), "unsupported_side", _pindex(kwargs))
+            order = _rejected_order(
+                context, security, 0, 0.0, _order_price(context, security, kwargs) or 0.0, "unsupported_side", _pindex(kwargs)
+            )
             _record_order(context, order)
-            return order
+            return None
 
         current_data = _current_data(security)
         price = _order_price(context, security, kwargs)
         if current_data is not None and current_data.paused:
-            order = _rejected_order(context, security, 0, 0.0, price, "paused", _pindex(kwargs))
+            order = _rejected_order(context, security, 0, 0.0, price or 0.0, "paused", _pindex(kwargs))
+            _record_order(context, order)
+            return None
+        if price is None or price <= 0:
+            order = _rejected_order(context, security, 0, 0.0, 0.0, "missing_price", _pindex(kwargs))
             _record_order(context, order)
             return None
 
@@ -148,6 +154,10 @@ class PaperBroker(Broker):
 
     def order_target(self, context: Context, security: str, amount: int, **kwargs) -> Order | None:
         price = _order_price(context, security, kwargs)
+        if price is None or price <= 0:
+            order = _rejected_order(context, security, 0, 0.0, 0.0, "missing_price", _pindex(kwargs))
+            _record_order(context, order)
+            return None
         return self.order_target_value(context, security, amount * price, **kwargs)
 
     def order(self, context: Context, security: str, amount: int, **kwargs) -> Order | None:
@@ -155,7 +165,7 @@ class PaperBroker(Broker):
         current_amount = current.total_amount if current else 0
         if amount < 0 and (current is None or current.closeable_amount <= 0):
             price = _order_price(context, security, kwargs)
-            order = _rejected_order(context, security, amount, 0.0, price, "insufficient_position", _pindex(kwargs))
+            order = _rejected_order(context, security, amount, 0.0, price or 0.0, "insufficient_position", _pindex(kwargs))
             _record_order(context, order)
             return None
         return self.order_target(context, security, current_amount + amount, **kwargs)
@@ -166,10 +176,15 @@ class PaperBroker(Broker):
         return self.order_target_value(context, security, current_value + value, **kwargs)
 
 
-def _order_price(context: Context, security: str, kwargs) -> float:
+def _order_price(context: Context, security: str, kwargs) -> float | None:
+    del context
     style = kwargs.get("style")
-    explicit = kwargs.get("price") or getattr(style, "price", None)
-    if explicit:
+    explicit = kwargs.get("price")
+    if explicit is None:
+        explicit = getattr(style, "price", None)
+    if explicit is None:
+        explicit = getattr(style, "limit_price", None)
+    if explicit is not None:
         return float(explicit)
     current_data = _current_data(security)
     if current_data is not None and current_data.last_price:
@@ -177,10 +192,10 @@ def _order_price(context: Context, security: str, kwargs) -> float:
     try:
         history = get_session().data.attribute_history(security, 1, "1d", ["close"], True, True, "pre")
     except Exception:
-        return 1.0
+        return None
     if len(history) and "close" in history:
         return float(history["close"].iloc[-1])
-    return 1.0
+    return None
 
 
 def _current_data(security: str):

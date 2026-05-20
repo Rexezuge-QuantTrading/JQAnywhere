@@ -100,7 +100,7 @@ class MarketDataProvider(ABC):
         a DataFrame indexed by ``datetime`` with securities as columns; modern pandas
         users should prefer ``panel=False`` for equivalent DataFrame output.
         """
-        raise NotImplementedError("JQAnywhere v0.8.0 does not implement get_price for this data provider")
+        raise NotImplementedError("JQAnywhere v0.9.0 does not implement get_price for this data provider")
 
     def get_index_stocks(self, index_symbol: str, date=None) -> list[str]:
         """Return tradable constituent security codes for an index on a date.
@@ -112,61 +112,61 @@ class MarketDataProvider(ABC):
         JQAnywhere, callers should pass an explicit event date when provider behavior
         must be deterministic. The return value is a list of stock codes.
         """
-        raise NotImplementedError("JQAnywhere v0.8.0 does not implement get_index_stocks for this data provider")
+        raise NotImplementedError("JQAnywhere v0.9.0 does not implement get_index_stocks for this data provider")
 
     def get_all_securities(self, types=None, date=None):
         """Return security metadata as a JoinQuant-style DataFrame indexed by code."""
-        raise NotImplementedError("JQAnywhere v0.8.0 does not implement get_all_securities for this data provider")
+        raise NotImplementedError("JQAnywhere v0.9.0 does not implement get_all_securities for this data provider")
 
-    def get_security_info(self, code: str) -> SecurityInfo:
+    def get_security_info(self, code: str, date=None) -> SecurityInfo:
         """Return one security's JoinQuant-style metadata object."""
-        raise NotImplementedError("JQAnywhere v0.8.0 does not implement get_security_info for this data provider")
+        raise NotImplementedError("JQAnywhere v0.9.0 does not implement get_security_info for this data provider")
 
     def get_trade_days(self, start_date=None, end_date=None, count=None) -> list[date]:
         """Return trading days between dates, or the last ``count`` days up to ``end_date``."""
-        raise NotImplementedError("JQAnywhere v0.8.0 does not implement get_trade_days for this data provider")
+        raise NotImplementedError("JQAnywhere v0.9.0 does not implement get_trade_days for this data provider")
 
     def get_all_trade_days(self) -> list[date]:
         """Return all trading days known by this data provider."""
-        raise NotImplementedError("JQAnywhere v0.8.0 does not implement get_all_trade_days for this data provider")
+        raise NotImplementedError("JQAnywhere v0.9.0 does not implement get_all_trade_days for this data provider")
 
     def get_fundamentals(self, query, date=None, statDate=None):
         """Return fundamentals for a JoinQuant-style query object."""
-        raise NotImplementedError("JQAnywhere v0.8.0 does not implement get_fundamentals for this data provider")
+        raise NotImplementedError("JQAnywhere v0.9.0 does not implement get_fundamentals for this data provider")
 
     def get_valuation(self, security, start_date=None, end_date=None, fields=None, count=None):
         """Return valuation fields for one or more securities."""
-        raise NotImplementedError("JQAnywhere v0.8.0 does not implement get_valuation for this data provider")
+        raise NotImplementedError("JQAnywhere v0.9.0 does not implement get_valuation for this data provider")
 
     def get_industry(self, security, date=None):
         """Return JoinQuant-shaped industry metadata keyed by security."""
-        raise NotImplementedError("JQAnywhere v0.8.0 does not implement get_industry for this data provider")
+        raise NotImplementedError("JQAnywhere v0.9.0 does not implement get_industry for this data provider")
 
     def get_extras(self, info, security_list, start_date=None, end_date=None, df=True, count=None):
         """Return JoinQuant-style extras such as ETF unit net value."""
-        raise NotImplementedError("JQAnywhere v0.8.0 does not implement get_extras for this data provider")
+        raise NotImplementedError("JQAnywhere v0.9.0 does not implement get_extras for this data provider")
 
     def get_money_flow(self, security_list, start_date=None, end_date=None, fields=None, count=None):
         """Return JoinQuant-style capital-flow data."""
-        raise NotImplementedError("JQAnywhere v0.8.0 does not implement get_money_flow for this data provider")
+        raise NotImplementedError("JQAnywhere v0.9.0 does not implement get_money_flow for this data provider")
 
     def get_bars(
         self, security, count: int, unit: str = "", fields=None, include_now: bool = False, end_dt=None, fq_ref_date=None, df=False
     ):
         """Return JoinQuant-style historical bars."""
-        raise NotImplementedError("JQAnywhere v0.8.0 does not implement get_bars for this data provider")
+        raise NotImplementedError("JQAnywhere v0.9.0 does not implement get_bars for this data provider")
 
     def get_industries(self, name: str, date=None):
         """Return JoinQuant-style industry list."""
-        raise NotImplementedError("JQAnywhere v0.8.0 does not implement get_industries for this data provider")
+        raise NotImplementedError("JQAnywhere v0.9.0 does not implement get_industries for this data provider")
 
     def get_industry_stocks(self, industry_code: str, date=None) -> list[str]:
         """Return JoinQuant-style industry constituents."""
-        raise NotImplementedError("JQAnywhere v0.8.0 does not implement get_industry_stocks for this data provider")
+        raise NotImplementedError("JQAnywhere v0.9.0 does not implement get_industry_stocks for this data provider")
 
     def finance_run_query(self, query):
         """Run a JoinQuant finance query."""
-        raise NotImplementedError("JQAnywhere v0.8.0 does not implement finance.run_query for this data provider")
+        raise NotImplementedError("JQAnywhere v0.9.0 does not implement finance.run_query for this data provider")
 
 
 class EmptyMarketDataProvider(MarketDataProvider):

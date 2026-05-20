@@ -429,12 +429,14 @@ class ADataMarketDataProvider(MarketDataProvider):
         elif "volume" in raw.columns:
             pause_series = pd.to_numeric(raw["volume"], errors="coerce") == 0
         if "paused" in fields and "paused" not in data.columns:
-            data["paused"] = pause_series.astype(int) if pause_series is not None else 0
+            if pause_series is None:
+                raise NotImplementedError("AData history does not expose paused status")
+            data["paused"] = pause_series.astype(int)
 
-        if skip_paused and "volume" in data.columns:
-            data = data[data["volume"] > 0]
-        elif skip_paused and "paused" in data.columns:
-            data = data[data["paused"] == 0]
+        if skip_paused:
+            if pause_series is None:
+                raise NotImplementedError("AData history cannot apply skip_paused without pause data")
+            data = data[~pause_series.reindex(data.index).fillna(False)]
         elif fill_paused and not data.empty:
             price_fields = [
                 field for field in ("open", "close", "high", "low", "avg", "pre_close", "high_limit", "low_limit") if field in data
@@ -445,9 +447,9 @@ class ADataMarketDataProvider(MarketDataProvider):
                 if field in data and pause_series is not None:
                     data.loc[pause_series, field] = 0.0
 
-        for field in fields:
-            if field not in data.columns:
-                data[field] = np.nan
+        missing = [field for field in fields if field not in data.columns]
+        if missing:
+            raise NotImplementedError(f"AData history does not expose JoinQuant fields: {', '.join(missing)}")
         return data[fields]
 
     def _fetch_current_data(self, security: str) -> CurrentData:

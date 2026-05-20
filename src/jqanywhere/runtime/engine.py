@@ -61,7 +61,7 @@ class RuntimeEngine:
                 current_dt=now,
                 previous_date=self._previous_date(now),
                 order_history=order_history,
-                # Minimal v0.8.0 compatibility for strategies that inspect end_date in
+                # Minimal v0.9.0 compatibility for strategies that inspect end_date in
                 # after_close callbacks. This is a single event timestamp, not a backtest range.
                 run_params=RunParams(type="sim_trade", end_date=now.date(), frequency="minute"),
                 subportfolios=subportfolios,

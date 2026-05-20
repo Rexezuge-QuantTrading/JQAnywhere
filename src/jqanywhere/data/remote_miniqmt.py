@@ -104,9 +104,9 @@ class RemoteMiniQmtMarketDataProvider(MarketDataProvider):
             },
         )
         data = pd.DataFrame(response.get("rows", response.get("data", [])))
-        for field in field_list:
-            if field not in data.columns:
-                data[field] = pd.NA
+        missing = [field for field in field_list if field not in data.columns]
+        if missing:
+            raise NotImplementedError(f"remote MiniQMT valuation response does not include required fields: {', '.join(missing)}")
         return data[field_list]
 
     def get_industry(self, security, date=None):
@@ -149,8 +149,8 @@ class RemoteMiniQmtMarketDataProvider(MarketDataProvider):
             data = data.set_index("code")
         return data
 
-    def get_security_info(self, code: str) -> SecurityInfo:
-        response = self.client.post("/v1/market/security-info", {"code": code})
+    def get_security_info(self, code: str, date=None) -> SecurityInfo:
+        response = self.client.post("/v1/market/security-info", {"code": code, "date": _date_value(date)})
         payload = response.get("security", response)
         return SecurityInfo(
             code=payload["code"],

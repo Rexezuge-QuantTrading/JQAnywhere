@@ -95,7 +95,7 @@ def _parse_time(value: str) -> tuple[int, int]:
     match = _TIME_PATTERN.match(value)
     if not match:
         raise NotImplementedError(
-            "JQAnywhere v0.8.0 scheduled jobs support HH:MM, every_bar, and before_open/open/close/after_close aliases"
+            "JQAnywhere v0.9.0 scheduled jobs support HH:MM, every_bar, and before_open/open/close/after_close aliases"
         )
     hour = int(match.group("hour"))
     minute = int(match.group("minute"))
@@ -105,7 +105,7 @@ def _parse_time(value: str) -> tuple[int, int]:
 
 
 def _is_every_bar_minute(now: datetime) -> bool:
-    # Minimal v0.8.0 support: every_bar is driven by external per-minute invocations.
+    # Minimal v0.9.0 support: every_bar is driven by external per-minute invocations.
     # JQAnywhere does not synthesize a 240-bar intraday loop inside one run.
     minute_of_day = now.hour * 60 + now.minute
     return (9 * 60 + 30 <= minute_of_day <= 11 * 60 + 29) or (13 * 60 <= minute_of_day <= 14 * 60 + 59)
