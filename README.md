@@ -7,6 +7,8 @@ Status: v0.8.0 alpha.
 
 JQAnywhere is designed for live trading, not backtesting. It processes one externally triggered scheduled event at a time, persists state between invocations, and sends orders to the configured paper or live broker. It does not replay historical date ranges, synthesize full intraday bar loops, or provide a portfolio simulator for research/backtest performance analysis.
 
+This is critical financial software. Any API described as JoinQuant-compatible must either match JoinQuant behavior for the supported inputs or fail explicitly with an exception. JQAnywhere does not return fabricated, placeholder, best-effort, or partially compatible financial data.
+
 Live-First Scope
 ----------------
 
@@ -89,10 +91,15 @@ Supported In v0.8.0
 - `set_slippage`
 - `set_order_cost`
 - `set_commission`
+- `set_subportfolios` for stock/fund-style subaccounts
+- `SubPortfolioConfig`
+- `context.subportfolios`
 - `attribute_history`
 - `history`
 - `get_current_data`
 - `get_price`
+- `get_bars` where the configured data provider supports exact bar data
+- `get_money_flow` where the configured data provider supports the requested fields
 - `get_index_stocks`
 - `get_all_securities`
 - `get_security_info`
@@ -102,7 +109,10 @@ Supported In v0.8.0
 - `get_fundamentals` where the configured data provider supports fundamentals
 - `get_valuation` where the configured data provider supports valuation data
 - `get_industry` where the configured data provider supports industry data
+- `get_industries` where the configured data provider supports industry lists
+- `get_industry_stocks` where the configured data provider supports industry constituents
 - `get_extras` where the configured data provider supports extras such as ETF unit net value
+- `finance.run_query` where the configured data provider supports exact finance tables
 - `record`
 - `order`
 - `order_target`
@@ -112,8 +122,9 @@ Supported In v0.8.0
 - `get_open_orders`
 - `get_orders`
 - `get_trades` as an import-compatible empty trade map
-- event-driven paper-trading portfolio accounting with market-data-based fills, fixed slippage, configured commission/order cost, rejection reasons, T+1-style closeable amounts, and order history
-- persisted paper portfolio cash and positions
+- event-driven paper-trading portfolio accounting with market-data-based fills, fixed or price-related slippage, configured commission/order cost, rejection reasons, T+1-style closeable amounts, and order history
+- `pindex`-aware paper order routing across configured subportfolios
+- persisted paper portfolio cash, subportfolio cash, positions, subaccount types, and order history
 - persisted order history and failed-run metadata
 - duplicate scheduled-run skipping for repeated EventBridge timestamps
 - scheduled-run claiming for state stores, including DynamoDB conditional claims to reduce concurrent duplicate execution risk
@@ -149,12 +160,15 @@ Set `[data].provider = "adata"` or `JQANYWHERE_DATA_PROVIDER=adata` to use AData
 - trade calendars through `get_trade_days` and `get_all_trade_days`
 - Shenwan industry metadata through `get_industry` when the installed AData SDK exposes it
 - latest ETF net-value extras through `get_extras("unit_net_value", ...)`, `get_extras("acc_net_value", ...)`, and `get_extras("adj_net_value", ...)` where the installed AData SDK exposes those fields
+- `get_money_flow(..., fields=["date", "sec_code", "change_pct"])` from provider-backed price changes
+- `get_bars(..., df=True/False)` for bars backed by the same price endpoints as `get_price`
 
 Known AData-backed limits:
 
 - historical minute data is only supported where the upstream AData endpoint exposes it; stock, ETF, and index minute endpoints are latest-trading-day oriented
 - historical ETF net-value extras are not implemented from AData latest metadata; dated requests fail explicitly rather than silently introducing lookahead
-- JoinQuant fundamentals/query DSL is import-compatible but not implemented from AData finance data because AData only exposes selected core financial indicators
+- JoinQuant fundamentals/query DSL, `get_valuation`, and `finance.run_query` are import-compatible but not implemented from AData because AData does not expose exact JoinQuant tables and field semantics
+- unsupported `get_money_flow` fields fail explicitly instead of returning incomplete capital-flow data
 - `fq="pre"` is the safest stock adjustment mode; other adjustment modes depend on upstream AData behavior
 
 Unsupported In v0.8.0
@@ -165,7 +179,7 @@ These APIs are deliberately unsupported and should raise explicit `NotImplemente
 - `handle_data`
 - internal tick/minute event loops; v0.8.0 `every_bar` support depends on external per-minute invocations and does not synthesize all intraday bars inside one run
 - fundamentals/query execution when the selected provider does not implement fundamentals
-- `finance.run_query`
+- `finance.run_query` when the selected provider does not implement exact finance tables
 - `macro.run_query`
 - factor APIs beyond import-compatible `jqfactor` stubs
 - portfolio optimizer

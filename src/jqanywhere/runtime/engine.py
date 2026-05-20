@@ -53,7 +53,7 @@ class RuntimeEngine:
         records = []
         due_job_names = []
         try:
-            persisted_g, portfolio, has_persisted_g, metadata, order_history = _decode_runtime_state(
+            persisted_g, portfolio, subportfolios, has_persisted_g, metadata, order_history = _decode_runtime_state(
                 self.state_store.load(self.strategy_id), self.initial_cash
             )
             context = Context(
@@ -64,9 +64,12 @@ class RuntimeEngine:
                 # Minimal v0.8.0 compatibility for strategies that inspect end_date in
                 # after_close callbacks. This is a single event timestamp, not a backtest range.
                 run_params=RunParams(type="sim_trade", end_date=now.date(), frequency="minute"),
+                subportfolios=subportfolios,
             )
             scheduler = Scheduler()
-            session = RuntimeSession(self.strategy_id, context, g, log, scheduler, self.data, self.broker)
+            session = RuntimeSession(
+                self.strategy_id, context, g, log, scheduler, self.data, self.broker, has_persisted_state=has_persisted_g
+            )
             records = session.records
             token = bind_session(session)
             self.broker.sync_portfolio(context)
@@ -104,10 +107,10 @@ class RuntimeEngine:
                 return result
 
             if due_job_names:
-                claim_state = _encode_runtime_state(g.to_dict(), context.portfolio, metadata, context.order_history)
+                claim_state = _encode_runtime_state(g.to_dict(), context.portfolio, metadata, context.order_history, context.subportfolios)
                 claim = self.state_store.claim_run(self.strategy_id, claim_state, run_key)
                 if not claim.claimed:
-                    claimed_g, claimed_portfolio, _, claimed_metadata, claimed_orders = _decode_runtime_state(
+                    claimed_g, claimed_portfolio, _, _, claimed_metadata, claimed_orders = _decode_runtime_state(
                         claim.state, self.initial_cash
                     )
                     log.info(f"Skipping locked or duplicate scheduled run for {run_key}")
@@ -138,7 +141,9 @@ class RuntimeEngine:
                 after_hook(context)
             state = g.to_dict()
             metadata = _next_metadata(metadata, now, run_key, due_job_names, "completed")
-            self.state_store.save(self.strategy_id, _encode_runtime_state(state, context.portfolio, metadata, context.order_history))
+            self.state_store.save(
+                self.strategy_id, _encode_runtime_state(state, context.portfolio, metadata, context.order_history, context.subportfolios)
+            )
             logs = log.flush_text()
             result = _runtime_result(
                 "completed",
@@ -161,7 +166,9 @@ class RuntimeEngine:
             order_history = context.order_history if context is not None else []
             metadata = _failure_metadata(locals().get("metadata", {}), now, exc)
             if context is not None:
-                self.state_store.save(self.strategy_id, _encode_runtime_state(g.to_dict(), context.portfolio, metadata, order_history))
+                self.state_store.save(
+                    self.strategy_id, _encode_runtime_state(g.to_dict(), context.portfolio, metadata, order_history, context.subportfolios)
+                )
             result = _runtime_result(
                 "failed",
                 self.strategy_id,
@@ -214,25 +221,36 @@ class RuntimeEngine:
 
 def _decode_runtime_state(
     raw_state: dict[str, Any], initial_cash: float
-) -> tuple[dict[str, Any], Portfolio, bool, dict[str, Any], list[dict[str, Any]]]:
+) -> tuple[dict[str, Any], Portfolio, list[Portfolio], bool, dict[str, Any], list[dict[str, Any]]]:
     if raw_state.get(_STATE_VERSION_KEY) == _STATE_VERSION:
+        portfolio = _portfolio_from_dict(raw_state.get("portfolio"), initial_cash)
+        subportfolios = [_portfolio_from_dict(item, initial_cash) for item in raw_state.get("subportfolios", [])]
+        if not subportfolios:
+            subportfolios = [portfolio]
         return (
             dict(raw_state.get("g", {})),
-            _portfolio_from_dict(raw_state.get("portfolio"), initial_cash),
+            portfolio,
+            subportfolios,
             True,
             dict(raw_state.get("metadata", {})),
             list(raw_state.get("orders", [])),
         )
-    return dict(raw_state), Portfolio(initial_cash, initial_cash), bool(raw_state), {}, []
+    portfolio = Portfolio(initial_cash, initial_cash)
+    return dict(raw_state), portfolio, [portfolio], bool(raw_state), {}, []
 
 
 def _encode_runtime_state(
-    g_state: dict[str, Any], portfolio: Portfolio, metadata: dict[str, Any] | None = None, orders: list[dict[str, Any]] | None = None
+    g_state: dict[str, Any],
+    portfolio: Portfolio,
+    metadata: dict[str, Any] | None = None,
+    orders: list[dict[str, Any]] | None = None,
+    subportfolios: list[Portfolio] | None = None,
 ) -> dict[str, Any]:
     return {
         _STATE_VERSION_KEY: _STATE_VERSION,
         "g": g_state,
         "portfolio": _portfolio_to_dict(portfolio),
+        "subportfolios": [_portfolio_to_dict(item) for item in (subportfolios or [portfolio])],
         "metadata": metadata or {},
         "orders": orders or [],
     }
@@ -339,6 +357,7 @@ def _portfolio_to_dict(portfolio: Portfolio) -> dict[str, Any]:
     return {
         "starting_cash": portfolio.starting_cash,
         "available_cash": portfolio.available_cash,
+        "type": portfolio.type,
         "positions": {
             security: {
                 "security": position.security,
@@ -348,6 +367,7 @@ def _portfolio_to_dict(portfolio: Portfolio) -> dict[str, Any]:
                 "avg_cost": position.avg_cost,
                 "value": position.value,
                 "last_trade_date": position.last_trade_date,
+                "pindex": position.pindex,
             }
             for security, position in portfolio.positions.items()
         },
@@ -367,9 +387,11 @@ def _portfolio_from_dict(data: dict[str, Any] | None, initial_cash: float) -> Po
             avg_cost=float(position_data.get("avg_cost", 0.0)),
             value=float(position_data.get("value", 0.0)),
             last_trade_date=position_data.get("last_trade_date"),
+            pindex=int(position_data.get("pindex", 0)),
         )
     return Portfolio(
         starting_cash=float(data.get("starting_cash", initial_cash)),
         available_cash=float(data.get("available_cash", initial_cash)),
         positions=positions,
+        type=str(data.get("type", "stock")),
     )

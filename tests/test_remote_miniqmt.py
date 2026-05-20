@@ -33,6 +33,16 @@ class FakeMiniQmtClient:
             return {"rows": [{"datetime": "2026-05-15", "open": 9.0, "close": 10.0}]}
         if path == "/v1/market/current":
             return {"current": [{"security": "000001.XSHE", "last_price": 10.1, "high_limit": 11.0, "low_limit": 9.0}]}
+        if path == "/v1/market/money-flow":
+            return {"rows": [{"date": "2026-05-15", "sec_code": "000001.XSHE", "change_pct": 1.2}]}
+        if path == "/v1/market/bars":
+            return {"rows": [{"date": "2026-05-15", "close": 10.0}]}
+        if path == "/v1/market/industries":
+            return {"rows": [{"code": "801780", "name": "银行"}]}
+        if path == "/v1/market/industry-stocks":
+            return {"securities": ["000001.XSHE"]}
+        if path == "/v1/market/finance-query":
+            return {"rows": [{"code": "000001.XSHE"}]}
         if path == "/v1/orders":
             return {
                 "client_order_id": payload["client_order_id"],
@@ -56,6 +66,23 @@ def test_remote_miniqmt_data_provider_maps_history_and_current_data():
     assert history["close"].iloc[0] == 10.0
     assert current.last_price == 10.1
     assert current.high_limit == 11.0
+
+
+def test_remote_miniqmt_data_provider_delegates_extended_market_apis():
+    client = FakeMiniQmtClient()
+    provider = RemoteMiniQmtMarketDataProvider(client)
+
+    money_flow = provider.get_money_flow("000001.XSHE", fields=["sec_code", "change_pct"], count=1)
+    bars = provider.get_bars("000001.XSHE", 1, fields=["date", "close"], df=True)
+    industries = provider.get_industries("sw_l1")
+    industry_stocks = provider.get_industry_stocks("801780")
+    finance = provider.finance_run_query(None)
+
+    assert money_flow.iloc[0]["change_pct"] == 1.2
+    assert bars.iloc[0]["close"] == 10.0
+    assert industries.loc["801780", "name"] == "银行"
+    assert industry_stocks == ["000001.XSHE"]
+    assert finance.iloc[0]["code"] == "000001.XSHE"
 
 
 def test_remote_miniqmt_broker_syncs_portfolio_and_submits_idempotent_order():

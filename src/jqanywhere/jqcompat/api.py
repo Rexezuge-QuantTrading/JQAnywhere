@@ -62,6 +62,36 @@ def run_monthly(func, monthday: int, time: str, reference_security: str = "") ->
     get_session().scheduler.run_monthly(func, monthday, time, reference_security)
 
 
+def set_subportfolios(subportfolios: list[SubPortfolioConfig]) -> None:
+    session = get_session()
+    if not subportfolios:
+        raise ValueError("set_subportfolios requires at least one SubPortfolioConfig")
+    if session.has_persisted_state and len(session.context.subportfolios) == len(subportfolios):
+        for portfolio, config in zip(session.context.subportfolios, subportfolios, strict=True):
+            portfolio.type = config.type
+        _refresh_aggregate_portfolio()
+        return
+    session.context.subportfolios = [Portfolio(float(config.cash), float(config.cash), type=config.type) for config in subportfolios]
+    _refresh_aggregate_portfolio()
+
+
+def transfer_cash(from_pindex: int, to_pindex: int, cash: float):
+    amount = float(cash)
+    if amount < 0:
+        raise ValueError("cash must be non-negative")
+    subportfolios = get_session().context.subportfolios
+    try:
+        source = subportfolios[from_pindex]
+        target = subportfolios[to_pindex]
+    except IndexError as exc:
+        raise ValueError("invalid subportfolio index") from exc
+    if source.available_cash < amount:
+        raise ValueError("insufficient subportfolio cash")
+    source.available_cash -= amount
+    target.available_cash += amount
+    _refresh_aggregate_portfolio()
+
+
 def attribute_history(
     security: str,
     count: int,
@@ -215,6 +245,22 @@ def get_all_trade_days(*args, **kwargs):
     return get_session().data.get_all_trade_days(*args, **kwargs)
 
 
+def get_money_flow(*args, **kwargs):
+    return get_session().data.get_money_flow(*args, **kwargs)
+
+
+def get_bars(*args, **kwargs):
+    return get_session().data.get_bars(*args, **kwargs)
+
+
+def get_industries(*args, **kwargs):
+    return get_session().data.get_industries(*args, **kwargs)
+
+
+def get_industry_stocks(*args, **kwargs):
+    return get_session().data.get_industry_stocks(*args, **kwargs)
+
+
 def unsupported(name: str):
     raise NotImplementedError(f"JQAnywhere v0.8.0 does not support {name}")
 
@@ -242,7 +288,24 @@ class _UnsupportedNamespace:
         unsupported(f"{self.name}.{name}")
 
 
-finance = _UnsupportedNamespace("finance")
+class _FinanceNamespace:
+    _SUPPORTED_TABLES = {"STK_XR_XD"}
+
+    def run_query(self, query_object):
+        try:
+            return get_session().data.finance_run_query(query_object)
+        except RuntimeError:
+            unsupported("finance.run_query")
+
+    def __getattr__(self, name):
+        if name in self._SUPPORTED_TABLES:
+            from jqanywhere.jqcompat.query import QueryTable
+
+            return QueryTable(name)
+        raise AttributeError(name)
+
+
+finance = _FinanceNamespace()
 macro = _UnsupportedNamespace("macro")
 
 
@@ -264,6 +327,41 @@ def portfolio_optimizer(*args, **kwargs):
 
 def _portfolio_securities() -> list[str]:
     return list(get_session().context.portfolio.positions)
+
+
+def _refresh_aggregate_portfolio() -> None:
+    context = get_session().context
+    subportfolios = context.subportfolios or [context.portfolio]
+    if len(subportfolios) == 1:
+        context.portfolio = subportfolios[0]
+        return
+    aggregate = Portfolio(
+        starting_cash=sum(portfolio.starting_cash for portfolio in subportfolios),
+        available_cash=sum(portfolio.available_cash for portfolio in subportfolios),
+        type="aggregate",
+    )
+    for pindex, portfolio in enumerate(subportfolios):
+        for security, position in portfolio.positions.items():
+            current = aggregate.positions.get(security)
+            if current is None:
+                aggregate.positions[security] = Position(
+                    security=position.security,
+                    total_amount=position.total_amount,
+                    closeable_amount=position.closeable_amount,
+                    price=position.price,
+                    avg_cost=position.avg_cost,
+                    value=position.value,
+                    last_trade_date=position.last_trade_date,
+                    pindex=pindex,
+                )
+                continue
+            total_amount = current.total_amount + position.total_amount
+            current.avg_cost = ((current.avg_cost * current.total_amount) + (position.avg_cost * position.total_amount)) / total_amount
+            current.total_amount = total_amount
+            current.closeable_amount += position.closeable_amount
+            current.price = position.price
+            current.value += position.value
+    context.portfolio = aggregate
 
 
 def _order_from_any(value) -> Order | None:
@@ -291,6 +389,7 @@ def _order_from_any(value) -> Order | None:
         order_id=value.get("order_id") or value.get("client_order_id") or value.get("broker_order_id"),
         side=value.get("side", "long"),
         action=value.get("action", "open"),
+        pindex=int(value.get("pindex", 0) or 0),
     )
 
 

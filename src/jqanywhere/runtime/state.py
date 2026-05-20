@@ -40,6 +40,7 @@ class RuntimeSession:
     order_cost: Any = None
     order_costs: dict[str, Any] = field(default_factory=dict)
     records: list[dict[str, Any]] = field(default_factory=list)
+    has_persisted_state: bool = False
 
 
 _session: ContextVar[RuntimeSession | None] = ContextVar("jqanywhere_session", default=None)

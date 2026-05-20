@@ -64,6 +64,13 @@ class Position:
     avg_cost: float = 0.0
     value: float = 0.0
     last_trade_date: Any = None
+    pindex: int = 0
+
+
+@dataclass
+class SubPortfolioConfig:
+    cash: float
+    type: str = "stock"
 
 
 @dataclass
@@ -79,6 +86,7 @@ class Portfolio:
     starting_cash: float
     available_cash: float
     positions: dict[str, Position] = field(default_factory=dict)
+    type: str = "stock"
 
     @property
     def positions_value(self) -> float:
@@ -100,6 +108,7 @@ class Context:
     previous_date: Any = None
     order_history: list[Any] = field(default_factory=list)
     run_params: RunParams = field(default_factory=RunParams)
+    subportfolios: list[Portfolio] = field(default_factory=list)
 
 
 @dataclass
@@ -157,3 +166,4 @@ class Order:
     order_id: str | None = None
     side: str = "long"
     action: str = "open"
+    pindex: int = 0

@@ -20,7 +20,11 @@ class _Evaluable:
         return SortKey(self, ascending=False)
 
     def _binary(self, other, func: Callable, symbol: str) -> QueryExpression:
-        return QueryExpression(lambda data: func(self.evaluate(data), _value(other, data)), f"({self} {symbol} {other})")
+        return QueryExpression(
+            lambda data: func(self.evaluate(data), _value(other, data)),
+            f"({self} {symbol} {other})",
+            _tables(self) | _tables(other),
+        )
 
     def __add__(self, other) -> QueryExpression:
         return self._binary(other, lambda left, right: left + right, "+")
@@ -69,22 +73,23 @@ class QueryField(_Evaluable):
             return data[self.name]
         if self.name == "code" and data.index.name == "code":
             return data.index.to_series(index=data.index)
-        return pd.Series(pd.NA, index=data.index)
+        raise NotImplementedError(f"data provider does not expose query field: {self.full_name}")
 
     def in_(self, values) -> QueryExpression:
-        return QueryExpression(lambda data: self.evaluate(data).isin(list(values)), f"{self}.in_(...)")
+        return QueryExpression(lambda data: self.evaluate(data).isin(list(values)), f"{self}.in_(...)", {self.table})
 
     def between(self, left, right) -> QueryExpression:
-        return QueryExpression(lambda data: self.evaluate(data).between(left, right), f"{self}.between({left}, {right})")
+        return QueryExpression(lambda data: self.evaluate(data).between(left, right), f"{self}.between({left}, {right})", {self.table})
 
     def __str__(self) -> str:
         return self.full_name
 
 
 class QueryExpression(_Evaluable):
-    def __init__(self, evaluator: Callable[[pd.DataFrame], Any], label: str):
+    def __init__(self, evaluator: Callable[[pd.DataFrame], Any], label: str, tables: set[str] | None = None):
         self._evaluator = evaluator
         self.label = label
+        self.tables = tables or set()
 
     def evaluate(self, data: pd.DataFrame):
         return self._evaluator(data)
@@ -132,6 +137,22 @@ class FundamentalsQuery:
             limit_count=count,
         )
 
+    @property
+    def table_names(self) -> set[str]:
+        tables = set()
+        for query_field in self.fields:
+            if isinstance(query_field, QueryField | QueryTable):
+                tables.add(query_field.table if isinstance(query_field, QueryField) else query_field.name)
+        for condition in self.conditions:
+            tables.update(getattr(condition, "tables", set()))
+        for sort_key in self.sort_keys:
+            expression = sort_key.expression
+            if isinstance(expression, QueryField):
+                tables.add(expression.table)
+            else:
+                tables.update(getattr(expression, "tables", set()))
+        return tables
+
 
 class QueryTable:
     def __init__(self, name: str):
@@ -150,6 +171,12 @@ def query(*fields) -> FundamentalsQuery:
 
 def _value(value, data: pd.DataFrame):
     return value.evaluate(data) if isinstance(value, _Evaluable) else value
+
+
+def _tables(value) -> set[str]:
+    if isinstance(value, QueryField):
+        return {value.table}
+    return set(getattr(value, "tables", set()))
 
 
 valuation = QueryTable("valuation")

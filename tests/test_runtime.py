@@ -8,6 +8,7 @@ import pytest
 
 from jqanywhere.broker.paper import PaperBroker
 from jqanywhere.data.base import EmptyMarketDataProvider, StaticMarketDataProvider
+from jqanywhere.jqcompat.query import indicator, query, valuation
 from jqanywhere.jqcompat.types import CurrentData
 from jqanywhere.notifications.console import ConsoleNotifier
 from jqanywhere.persistence.memory import MemoryStateStore
@@ -606,10 +607,21 @@ def test_fundamentals_query_equality_table_projection_and_reuse(tmp_path):
 
 
 def test_get_valuation_supports_official_signature_defaults_and_dates():
+    valuation_fields = {
+        "capitalization": 100.0,
+        "circulating_cap": 80.0,
+        "circulating_market_cap": 800.0,
+        "turnover_ratio": 1.2,
+        "pe_ratio": 10.0,
+        "pe_ratio_lyr": 11.0,
+        "pb_ratio": 1.0,
+        "ps_ratio": 2.0,
+        "pcf_ratio": 3.0,
+    }
     fundamentals = pd.DataFrame(
         [
-            {"code": "000001.XSHE", "day": "2026-05-14", "market_cap": 10.0},
-            {"code": "000001.XSHE", "day": "2026-05-15", "market_cap": 11.0},
+            {"code": "000001.XSHE", "day": "2026-05-14", "market_cap": 10.0, **valuation_fields},
+            {"code": "000001.XSHE", "day": "2026-05-15", "market_cap": 11.0, **valuation_fields},
         ]
     )
     data = StaticMarketDataProvider(fundamentals=fundamentals)
@@ -632,6 +644,13 @@ def test_get_valuation_supports_official_signature_defaults_and_dates():
     ]
     assert result["day"].tolist() == ["2026-05-15"]
     assert result["market_cap"].tolist() == [11.0]
+
+
+def test_strict_query_missing_field_fails_explicitly():
+    data = StaticMarketDataProvider(fundamentals=pd.DataFrame([{"code": "000001.XSHE", "market_cap": 10.0}]))
+
+    with pytest.raises(NotImplementedError, match="indicator.roe"):
+        data.get_fundamentals(query(valuation.code).filter(indicator.roe > 0))
 
 
 def test_paper_broker_uses_asset_type_specific_costs_and_slippage(tmp_path):
@@ -771,6 +790,56 @@ def test_paper_broker_keeps_same_day_buys_non_closeable(tmp_path):
 
     assert first["state"]["same_day_closeable"] == 0
     assert second["state"]["next_day_closeable"] == 10
+
+
+def test_subportfolios_route_orders_by_pindex_and_persist(tmp_path):
+    strategy_path = tmp_path / "subportfolio_strategy.py"
+    strategy_path.write_text(
+        "from jqdata import *\n"
+        "\n"
+        "def initialize(context):\n"
+        "    g.count = getattr(g, 'count', 0)\n"
+        "    set_subportfolios([SubPortfolioConfig(cash=500, type='stock'), SubPortfolioConfig(cash=500, type='stock')])\n"
+        "    run_daily(trade, '09:50')\n"
+        "\n"
+        "def trade(context):\n"
+        "    if g.count == 0:\n"
+        "        order_target_value('000001.XSHE', 100, pindex=0)\n"
+        "        order_target_value('510300.XSHG', 200, pindex=1)\n"
+        "    else:\n"
+        "        g.cash0 = context.subportfolios[0].available_cash\n"
+        "        g.cash1 = context.subportfolios[1].available_cash\n"
+        "        g.sub0 = list(context.subportfolios[0].positions)\n"
+        "        g.sub1 = list(context.subportfolios[1].positions)\n"
+        "    g.count += 1\n",
+        encoding="utf-8",
+    )
+    data = StaticMarketDataProvider(current=["000001.XSHE", "510300.XSHG"])
+    data.current["000001.XSHE"].last_price = 10.0
+    data.current["510300.XSHG"].last_price = 1.0
+    store = MemoryStateStore()
+    engine = RuntimeEngine(
+        strategy_id="subportfolio",
+        strategy_path=strategy_path,
+        data=data,
+        broker=PaperBroker(),
+        state_store=store,
+        notifier=ConsoleNotifier(),
+        initial_cash=1_000,
+    )
+
+    first = engine.run(now=datetime(2026, 5, 18, 9, 50))
+    second = engine.run(now=datetime(2026, 5, 19, 9, 50))
+    saved = store.load("subportfolio")
+
+    assert [order["pindex"] for order in first["orders"]] == [0, 1]
+    assert first["portfolio"]["available_cash"] == 700
+    assert second["state"]["cash0"] == 400
+    assert second["state"]["cash1"] == 300
+    assert second["state"]["sub0"] == ["000001.XSHE"]
+    assert second["state"]["sub1"] == ["510300.XSHG"]
+    assert saved["subportfolios"][0]["available_cash"] == 400
+    assert saved["subportfolios"][1]["available_cash"] == 300
 
 
 def test_order_management_apis_are_available(tmp_path):
