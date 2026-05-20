@@ -9,6 +9,15 @@ JQAnywhere is designed for live trading, not backtesting. It processes one exter
 
 This is critical financial software. Any API described as JoinQuant-compatible must either match JoinQuant behavior for the supported inputs or fail explicitly with an exception. JQAnywhere does not return fabricated, placeholder, best-effort, or partially compatible financial data.
 
+Legal Notice
+------------
+
+JQAnywhere is an independent MIT-licensed open-source project. It is not affiliated with, endorsed by, or connected to JoinQuant (聚宽).
+
+The project provides an independently implemented runtime that aims to support publicly observable JoinQuant-style strategy APIs. No JoinQuant source code, documentation text, proprietary datasets, or internal implementation details are used.
+
+"JQ" in the project name refers only to "JoinQuant-style API compatibility" and does not imply any official relationship.
+
 Live-First Scope
 ----------------
 
