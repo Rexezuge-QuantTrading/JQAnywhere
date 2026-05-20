@@ -421,10 +421,16 @@ class ADataMarketDataProvider(MarketDataProvider):
             return CurrentData(security=security, paused=True)
 
         row = raw.iloc[0]
-        price = _first_row_value(row, "price", "last_price", "close")
-        volume = _row_get(row, "volume", 0)
+        price = _first_row_value(row, "price", "last_price", "close", "now")
+        volume = _first_row_value(row, "volume", "vol", "trade_volume")
         trade_date = _row_get(row, "trade_date")
-        paused = price is None or pd.isna(price) or volume is None or float(volume) == 0
+        explicit_paused = _first_row_value(row, "paused", "is_paused", "suspended")
+        if explicit_paused is not None:
+            paused = bool(_bool_or_none(explicit_paused))
+        else:
+            paused = price is None or pd.isna(price)
+            if volume is not None and not pd.isna(volume):
+                paused = paused or float(volume) == 0
         if self.strict_current_date and trade_date is not None:
             paused = paused or _parse_date(trade_date) != date.today()
         high_limit = _float_or_none(_row_get(row, "high_limit"))
@@ -433,8 +439,8 @@ class ADataMarketDataProvider(MarketDataProvider):
             security=security,
             paused=paused,
             last_price=_float_or_none(price),
-            high=_float_or_none(_row_get(row, "high")),
-            low=_float_or_none(_row_get(row, "low")),
+            high=_float_or_none(_first_row_value(row, "high", "high_price")),
+            low=_float_or_none(_first_row_value(row, "low", "low_price")),
             # Some upstream ETF/fund quotes omit limit prices. JoinQuant exposes
             # numeric attributes, so use non-blocking bounds rather than returning
             # None and crashing common strategy guard comparisons.
@@ -444,7 +450,7 @@ class ADataMarketDataProvider(MarketDataProvider):
             day_open=_float_or_none(_first_row_value(row, "day_open", "open")),
             pre_close=_float_or_none(_row_get(row, "pre_close")),
             volume=_float_or_none(volume),
-            money=_float_or_none(_first_row_value(row, "money", "amount")),
+            money=_float_or_none(_first_row_value(row, "money", "amount", "turnover")),
             avg_price=_float_or_none(_first_row_value(row, "avg_price", "avg")),
             name=_first_row_value(row, "name", "short_name"),
             industry_code=_row_get(row, "industry_code"),
@@ -710,7 +716,18 @@ def _float_or_none(value) -> float | None:
 
 
 def _bool_or_none(value) -> bool | None:
-    return None if value is None or pd.isna(value) else bool(value)
+    if value is None or pd.isna(value):
+        return None
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int | float):
+        return int(value) != 0
+    text = str(value).strip().lower()
+    if text in {"1", "true", "t", "yes", "y", "是"}:
+        return True
+    if text in {"0", "false", "f", "no", "n", "否"}:
+        return False
+    return bool(value)
 
 
 def _row_get(row: Any, key: str, default=None):

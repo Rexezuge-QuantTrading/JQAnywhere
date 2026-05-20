@@ -309,6 +309,19 @@ def test_adata_current_data_uses_safe_price_limit_fallbacks(monkeypatch):
     assert data.low_limit == 0.0
 
 
+def test_adata_fund_current_data_does_not_require_volume_column(monkeypatch):
+    market = types.SimpleNamespace(
+        get_market_etf_current=lambda **kwargs: pd.DataFrame({"last_price": [1.23], "amount": [1000.0], "trade_date": ["2026-05-15"]})
+    )
+    _install_adata(monkeypatch, fund_market=market)
+
+    data = ADataMarketDataProvider().get_current_data()["511880.XSHG"]
+
+    assert data.paused is False
+    assert data.last_price == 1.23
+    assert data.money == 1000.0
+
+
 def test_adata_get_index_stocks_maps_codes(monkeypatch):
     info = types.SimpleNamespace(index_constituent=lambda **kwargs: pd.DataFrame({"stock_code": ["600000", "000001"]}))
     _install_adata(monkeypatch, stock_info=info)

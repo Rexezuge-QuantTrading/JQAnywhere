@@ -57,6 +57,8 @@ def _is_due(job: ScheduledJob, now: datetime, trade_days=None) -> bool:
             return False
     elif _parse_time(job.time) != (now.hour, now.minute):
         return False
+    if trade_days and now.date() not in set(trade_days):
+        return False
     if job.frequency == "daily":
         return True
     if job.frequency == "weekly":
