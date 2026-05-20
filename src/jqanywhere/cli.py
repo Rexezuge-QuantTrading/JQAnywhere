@@ -40,18 +40,18 @@ UNSUPPORTED_API = [
 
 
 def main(argv: list[str] | None = None) -> None:
-    parser = argparse.ArgumentParser(description="Run JoinQuant-style strategies anywhere")
+    parser = argparse.ArgumentParser(description="Process JoinQuant-style live/event-driven strategy events")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    run_parser = subparsers.add_parser("run", help="Run a configured strategy once")
+    run_parser = subparsers.add_parser("run", help="Process one configured strategy event")
     run_parser.add_argument("--config", default=None)
-    run_parser.add_argument("--now", default=None, help="Invocation time as an ISO-8601 datetime")
+    run_parser.add_argument("--now", default=None, help="Single event timestamp as an ISO-8601 datetime")
     run_parser.add_argument("--json", action="store_true", help="Print machine-readable JSON")
 
-    invoke_parser = subparsers.add_parser("invoke", help="Run a strategy file once")
+    invoke_parser = subparsers.add_parser("invoke", help="Process one event for a strategy file")
     invoke_parser.add_argument("--strategy", required=True)
     invoke_parser.add_argument("--config", default=None)
-    invoke_parser.add_argument("--now", default=None, help="Invocation time as an ISO-8601 datetime")
+    invoke_parser.add_argument("--now", default=None, help="Single event timestamp as an ISO-8601 datetime")
     invoke_parser.add_argument("--json", action="store_true", help="Print machine-readable JSON")
 
     list_api_parser = subparsers.add_parser("list-api", help="List v0.8.0 API surface")

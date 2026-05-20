@@ -1,9 +1,19 @@
 JQAnywhere
 ==========
 
-JQAnywhere is an MIT-licensed Python framework for running JoinQuant-style strategies on AWS-compatible infrastructure. The goal is to let users copy a supported JoinQuant strategy file unchanged, keep `from jqdata import *`, and run it locally, on AWS, or on LocalStack.
+JQAnywhere is an MIT-licensed live-trading runtime for running JoinQuant-style strategies on AWS-compatible infrastructure. The goal is to let users copy a supported JoinQuant strategy file unchanged, keep `from jqdata import *`, and run it locally, on AWS, or on LocalStack as an event-driven paper or live trading process.
 
 Status: v0.8.0 alpha.
+
+JQAnywhere is designed for live trading, not backtesting. It processes one externally triggered scheduled event at a time, persists state between invocations, and sends orders to the configured paper or live broker. It does not replay historical date ranges, synthesize full intraday bar loops, or provide a portfolio simulator for research/backtest performance analysis.
+
+Live-First Scope
+----------------
+
+- `runtime.mode = "paper"` means event-driven paper trading/dry-run execution against the configured data provider; it is not a historical backtest mode.
+- `runtime.mode = "live"` is required for live broker adapters such as `remote_miniqmt`.
+- `jqanywhere run --now ...` sets the event timestamp for one invocation. It is useful for deterministic scheduling checks and local operations, but data providers may still use current/latest upstream data and it should not be treated as historical replay.
+- `run_daily(..., time="every_bar")` only runs when JQAnywhere is invoked for an eligible trading minute; use EventBridge or cron per-minute schedules for live-style minute execution.
 
 Quick Start
 -----------
@@ -40,7 +50,7 @@ def trade(context):
 Design
 ------
 
-JQAnywhere is a compatibility runtime, not a strategy-adapter framework. User strategy files should stay in JoinQuant's global-function style:
+JQAnywhere is a live/event-driven compatibility runtime, not a strategy-adapter framework or backtesting engine. User strategy files should stay in JoinQuant's global-function style:
 
 - `from jqdata import *`
 - `initialize(context)`
@@ -71,8 +81,8 @@ Supported In v0.8.0
 - `g`, `context`, `log`
 - `context.current_dt`
 - `context.previous_date` when the selected data provider exposes a trade calendar
-- `context.run_params.type`
-- `context.run_params.end_date` as a v0.8.0 single-run compatibility shim; this is not a full JoinQuant backtest range
+- `context.run_params.type` as a JoinQuant compatibility shim; the current value is not a JQAnywhere backtest mode
+- `context.run_params.end_date` as a v0.8.0 single-event compatibility shim; this is not a full JoinQuant backtest range
 - `context.run_params.frequency`
 - `set_option`
 - `set_benchmark`
@@ -102,7 +112,7 @@ Supported In v0.8.0
 - `get_open_orders`
 - `get_orders`
 - `get_trades` as an import-compatible empty trade map
-- paper portfolio accounting with market-data-based fills, fixed slippage, configured commission/order cost, rejection reasons, T+1-style closeable amounts, and order history
+- event-driven paper-trading portfolio accounting with market-data-based fills, fixed slippage, configured commission/order cost, rejection reasons, T+1-style closeable amounts, and order history
 - persisted paper portfolio cash and positions
 - persisted order history and failed-run metadata
 - duplicate scheduled-run skipping for repeated EventBridge timestamps
@@ -117,7 +127,7 @@ Supported In v0.8.0
 - AWS Lambda entrypoint
 - EventBridge event-time handling
 - Serverless deployment template
-- deterministic local invocation through `jqanywhere run --now ...`
+- deterministic local event invocation through `jqanywhere run --now ...`
 - machine-readable CLI output through `jqanywhere run --json ...`
 - direct one-off strategy invocation through `jqanywhere invoke --strategy ...`
 - config validation through `jqanywhere config validate --config ...`
@@ -198,14 +208,15 @@ Security notes:
 Operational Notes
 -----------------
 
-- `jqanywhere run --json` writes the run result as JSON on stdout; console notifications are written to stderr.
-- `jqanywhere invoke --strategy path/to/file.py` runs a strategy file once while still loading provider, broker, persistence, and notification settings from config/env.
+- `jqanywhere run --json` writes the single-event run result as JSON on stdout; console notifications are written to stderr.
+- `jqanywhere invoke --strategy path/to/file.py` processes a strategy file for one event while still loading provider, broker, persistence, and notification settings from config/env.
+- `--now` controls the invocation timestamp only; it does not switch providers into historical replay or backtest mode.
 - Repeated scheduled invocations at the same normalized event minute are skipped after a successful run, preventing duplicate order execution for at-least-once EventBridge delivery.
 - Scheduled runs first claim the normalized event minute in the configured state store; DynamoDB uses a conditional claim to reduce duplicate execution under concurrent delivery.
 - Runtime failures return `status="failed"` and send a failure notification containing the strategy id, event time, and exception summary.
 - Runtime failures persist `last_status="failed"`, `last_failed_at`, and `last_error`; failed scheduled runs are retryable because they do not advance `last_run_key`.
 - Unknown providers such as `[data].provider = "bad"` fail during config loading instead of silently falling back to defaults.
-- Paper trading is still a deterministic approximation. Market orders use current data or recent close when available, apply configured fixed slippage and cost settings, and reject paused or limit-blocked securities, but it is not a live broker simulator.
+- Paper trading is still a deterministic event-driven approximation. Market orders use current data or recent close when available, apply configured fixed slippage and cost settings, and reject paused or limit-blocked securities, but it is not a backtest simulator or full live broker simulator.
 - Paper order creation failures return `None` to strategies, matching JoinQuant-style failure checks, while rejected order details remain in returned run history for diagnostics.
 - Paper portfolios mark persisted positions to available current or recent prices before each run so local account value reflects price movement between scheduled invocations.
 

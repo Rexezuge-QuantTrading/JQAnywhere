@@ -4,6 +4,7 @@ path = "examples/simple_daily_allocation.py"
 
 [runtime]
 timezone = "Asia/Shanghai"
+# Event-driven paper trading, not historical backtesting.
 mode = "paper"
 
 [broker]

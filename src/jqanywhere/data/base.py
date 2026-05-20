@@ -108,8 +108,9 @@ class MarketDataProvider(ABC):
         JoinQuant API: ``get_index_stocks(index_symbol, date=None)``.
         ``index_symbol`` is an index code such as ``"000300.XSHG"``. ``date`` may be
         a ``YYYY-MM-DD`` string, ``datetime.date``, ``datetime.datetime``, or ``None``.
-        In backtests, JoinQuant's default date is ``context.current_dt``; in research,
-        the default is today. The return value is a list of stock codes.
+        In JoinQuant, default dates differ between backtest and research contexts. In
+        JQAnywhere, callers should pass an explicit event date when provider behavior
+        must be deterministic. The return value is a list of stock codes.
         """
         raise NotImplementedError("JQAnywhere v0.8.0 does not implement get_index_stocks for this data provider")
 
