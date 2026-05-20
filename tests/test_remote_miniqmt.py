@@ -85,3 +85,15 @@ def test_remote_miniqmt_broker_reuses_client_order_id_for_same_run_target():
     order_posts = [request for request in client.requests if request[1] == "/v1/orders"]
     assert first.status == second.status
     assert order_posts[0][2]["client_order_id"] == order_posts[1][2]["client_order_id"]
+
+
+def test_remote_miniqmt_broker_blocks_trading_until_enabled():
+    broker = RemoteMiniQmtBroker(FakeMiniQmtClient(), "1000000365", enable_trading=False)
+    context = Context(portfolio=Portfolio(100_000, 100_000), current_dt=datetime(2026, 5, 18, 9, 50))
+
+    try:
+        broker.order_target_value(context, "000001.XSHE", 1000)
+    except RuntimeError as exc:
+        assert "trading is disabled" in str(exc)
+    else:
+        raise AssertionError("trading should require enable_trading=True")

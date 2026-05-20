@@ -120,6 +120,80 @@ def test_run_daily_only_runs_matching_time(tmp_path):
     assert due["state"]["ran"] is True
 
 
+def test_run_daily_skips_non_trade_day_when_calendar_is_available(tmp_path):
+    strategy_path = tmp_path / "daily_calendar_strategy.py"
+    strategy_path.write_text(
+        "from jqdata import *\n"
+        "\n"
+        "def initialize(context):\n"
+        "    g.count = getattr(g, 'count', 0)\n"
+        "    run_daily(trade, '14:40')\n"
+        "\n"
+        "def trade(context):\n"
+        "    g.count += 1\n",
+        encoding="utf-8",
+    )
+    engine = RuntimeEngine(
+        strategy_id="daily_calendar",
+        strategy_path=strategy_path,
+        data=StaticMarketDataProvider(trade_days=["2026-05-18"]),
+        broker=PaperBroker(),
+        state_store=MemoryStateStore(),
+        notifier=ConsoleNotifier(),
+        initial_cash=100_000,
+    )
+
+    trading_day = engine.run(now=datetime(2026, 5, 18, 14, 40))
+    non_trading_day = engine.run(now=datetime(2026, 5, 19, 14, 40))
+
+    assert trading_day["state"]["count"] == 1
+    assert non_trading_day["state"]["count"] == 1
+    assert non_trading_day["due_jobs"] == []
+
+
+def test_generic_multi_asset_fund_rotation_runs_end_to_end(tmp_path):
+    strategy_path = _generic_multi_asset_strategy(tmp_path)
+    data = _multi_asset_data()
+    engine = RuntimeEngine(
+        strategy_id="generic_multi_asset",
+        strategy_path=strategy_path,
+        data=data,
+        broker=PaperBroker(),
+        state_store=MemoryStateStore(),
+        notifier=ConsoleNotifier(),
+        initial_cash=100_000,
+    )
+
+    result = engine.run(now=datetime(2026, 5, 18, 14, 40))
+
+    assert result["status"] == "completed"
+    assert result["due_jobs"] == ["rebalance"]
+    assert set(result["portfolio"]["positions"]) == {"510200.XSHG", "510300.XSHG", "511800.XSHG"}
+    assert result["state"]["high_watermark"] == {"510200.XSHG": 20.0, "510300.XSHG": 30.0}
+
+
+def test_generic_multi_asset_rotation_blacklists_stopped_position(tmp_path):
+    strategy_path = _generic_multi_asset_strategy(tmp_path)
+    data = _multi_asset_data()
+    engine = RuntimeEngine(
+        strategy_id="generic_multi_asset_stop",
+        strategy_path=strategy_path,
+        data=data,
+        broker=PaperBroker(),
+        state_store=MemoryStateStore(),
+        notifier=ConsoleNotifier(),
+        initial_cash=100_000,
+    )
+
+    engine.run(now=datetime(2026, 5, 18, 14, 40))
+    data.current["510200.XSHG"].last_price = 16.0
+    result = engine.run(now=datetime(2026, 5, 19, 14, 40))
+
+    assert result["status"] == "completed"
+    assert result["state"]["blacklist"]["510200.XSHG"] == 2
+    assert any(order["security"] == "510200.XSHG" and order["action"] == "close" for order in result["orders"])
+
+
 def test_run_daily_every_bar_runs_during_trading_minutes(tmp_path):
     strategy_path = tmp_path / "every_bar_strategy.py"
     strategy_path.write_text(
@@ -919,3 +993,73 @@ def test_lambda_event_time_parses_eventbridge_time():
     result = _event_time({"time": "2026-05-18T01:50:00Z"})
 
     assert result.isoformat() == "2026-05-18T01:50:00+00:00"
+
+
+def _generic_multi_asset_strategy(tmp_path):
+    strategy_path = tmp_path / "generic_multi_asset_strategy.py"
+    strategy_path.write_text(
+        "from jqdata import *\n"
+        "\n"
+        "def initialize(context):\n"
+        "    g.assets = ['510100.XSHG', '510200.XSHG', '510300.XSHG']\n"
+        "    g.safe = '511800.XSHG'\n"
+        "    g.high_watermark = getattr(g, 'high_watermark', {})\n"
+        "    g.blacklist = getattr(g, 'blacklist', {})\n"
+        "    set_order_cost(OrderCost(open_commission=0.0, close_commission=0.0, min_commission=0), type='fund')\n"
+        "    run_daily(rebalance, '14:40')\n"
+        "\n"
+        "def score(security):\n"
+        "    bars = attribute_history(security, 5, '1d', ['close'])\n"
+        "    if len(bars) < 5:\n"
+        "        return -1\n"
+        "    return float(bars['close'].iloc[-1] - bars['close'].iloc[0])\n"
+        "\n"
+        "def rebalance(context):\n"
+        "    current = get_current_data()\n"
+        "    for security in list(g.blacklist):\n"
+        "        g.blacklist[security] -= 1\n"
+        "        if g.blacklist[security] <= 0:\n"
+        "            del g.blacklist[security]\n"
+        "    for security in list(context.portfolio.positions):\n"
+        "        if security == g.safe:\n"
+        "            continue\n"
+        "        price = current[security].last_price\n"
+        "        g.high_watermark[security] = max(g.high_watermark.get(security, price), price)\n"
+        "        if price <= g.high_watermark[security] * 0.85:\n"
+        "            order_target_value(security, 0)\n"
+        "            g.high_watermark.pop(security, None)\n"
+        "            g.blacklist[security] = 2\n"
+        "    ranked = sorted(\n"
+        "        (score(security), security)\n"
+        "        for security in g.assets\n"
+        "        if not current[security].paused and security not in g.blacklist\n"
+        "    )\n"
+        "    picks = [security for value, security in ranked[-2:] if value > 0]\n"
+        "    targets = {g.safe: context.portfolio.total_value * 0.30}\n"
+        "    for security in picks:\n"
+        "        targets[security] = context.portfolio.total_value * 0.30\n"
+        "    for security in list(context.portfolio.positions):\n"
+        "        if security not in targets:\n"
+        "            order_target_value(security, 0)\n"
+        "    for security, value in targets.items():\n"
+        "        order_target_value(security, value)\n"
+        "        if security != g.safe:\n"
+        "            g.high_watermark[security] = current[security].last_price\n",
+        encoding="utf-8",
+    )
+    return strategy_path
+
+
+def _multi_asset_data():
+    history = {
+        "510100.XSHG": pd.DataFrame({"close": [10.0, 9.8, 9.6, 9.5, 9.4]}, index=pd.date_range("2026-05-11", periods=5)),
+        "510200.XSHG": pd.DataFrame({"close": [16.0, 17.0, 18.0, 19.0, 20.0]}, index=pd.date_range("2026-05-11", periods=5)),
+        "510300.XSHG": pd.DataFrame({"close": [25.0, 26.0, 27.0, 28.0, 30.0]}, index=pd.date_range("2026-05-11", periods=5)),
+        "511800.XSHG": pd.DataFrame({"close": [1.0, 1.0, 1.0, 1.0, 1.0]}, index=pd.date_range("2026-05-11", periods=5)),
+    }
+    data = StaticMarketDataProvider(history=history, current=history)
+    data.current["510100.XSHG"] = CurrentData("510100.XSHG", paused=False, last_price=9.4)
+    data.current["510200.XSHG"] = CurrentData("510200.XSHG", paused=False, last_price=20.0)
+    data.current["510300.XSHG"] = CurrentData("510300.XSHG", paused=False, last_price=30.0)
+    data.current["511800.XSHG"] = CurrentData("511800.XSHG", paused=False, last_price=1.0)
+    return data

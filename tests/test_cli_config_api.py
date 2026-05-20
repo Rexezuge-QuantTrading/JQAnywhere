@@ -97,3 +97,40 @@ def test_cli_doctor_json_reports_configured_providers(tmp_path, capsys):
     result = json.loads(capsys.readouterr().out)
     assert result["status"] == "ok"
     assert {check["name"] for check in result["checks"]} >= {"config", "strategy_path", "data_provider", "broker_provider"}
+
+
+def test_cli_doctor_reports_remote_miniqmt_live_readiness(tmp_path, capsys, monkeypatch):
+    config_path = tmp_path / "jqanywhere.toml"
+    strategy_path = tmp_path / "strategy.py"
+    strategy_path.write_text("def initialize(context):\n    pass\n", encoding="utf-8")
+    config_path.write_text(
+        f'''
+[strategy]
+path = "{strategy_path}"
+
+[runtime]
+mode = "live"
+
+[data]
+provider = "remote_miniqmt"
+endpoint = "http://127.0.0.1:8000"
+token_env = "TEST_MINIQMT_TOKEN"
+
+[broker]
+provider = "remote_miniqmt"
+endpoint = "http://127.0.0.1:8000"
+account_id = "1000000365"
+enable_trading = false
+''',
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("TEST_MINIQMT_TOKEN", "secret")
+
+    main(["doctor", "--config", str(config_path), "--json"])
+
+    result = json.loads(capsys.readouterr().out)
+    checks = {check["name"]: check for check in result["checks"]}
+    assert result["status"] == "ok"
+    assert checks["remote_miniqmt_data_endpoint"]["message"] == "http://127.0.0.1:8000"
+    assert checks["remote_miniqmt_data_token"]["message"] == "TEST_MINIQMT_TOKEN set"
+    assert checks["remote_miniqmt_trading"]["message"] == "disabled/read-only"

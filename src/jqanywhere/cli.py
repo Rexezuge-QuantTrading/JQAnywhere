@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from datetime import datetime
 from pathlib import Path
 
@@ -115,10 +116,25 @@ def _doctor(config_path: str | None) -> dict:
     checks.append({"name": "strategy_path", "status": strategy_path_status, "message": str(config.strategy.path)})
     checks.append({"name": "data_provider", "status": "ok", "message": config.data.provider})
     checks.append({"name": "broker_provider", "status": "ok", "message": config.broker.provider})
+    checks.extend(_remote_miniqmt_checks(config))
     checks.append({"name": "persistence_provider", "status": "ok", "message": config.persistence.provider})
     checks.append({"name": "notifier", "status": "ok", "message": config.notifications.provider})
     status = "ok" if all(check["status"] == "ok" for check in checks) else "failed"
     return {"status": status, "checks": checks}
+
+
+def _remote_miniqmt_checks(config) -> list[dict[str, str]]:
+    checks = []
+    if config.data.provider == "remote_miniqmt":
+        checks.append({"name": "remote_miniqmt_data_endpoint", "status": "ok", "message": config.data.endpoint or "missing"})
+        token_status = "set" if os.getenv(config.data.token_env) else "not set"
+        checks.append({"name": "remote_miniqmt_data_token", "status": "ok", "message": f"{config.data.token_env} {token_status}"})
+    if config.broker.provider == "remote_miniqmt":
+        checks.append({"name": "remote_miniqmt_broker_endpoint", "status": "ok", "message": config.broker.endpoint or "missing"})
+        checks.append({"name": "remote_miniqmt_account", "status": "ok", "message": config.broker.account_id or "missing"})
+        trading_state = "enabled" if config.broker.enable_trading else "disabled/read-only"
+        checks.append({"name": "remote_miniqmt_trading", "status": "ok", "message": trading_state})
+    return checks
 
 
 def _format_doctor(result: dict) -> str:
