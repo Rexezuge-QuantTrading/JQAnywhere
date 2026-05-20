@@ -61,7 +61,9 @@ class RuntimeEngine:
                 current_dt=now,
                 previous_date=self._previous_date(now),
                 order_history=order_history,
-                run_params=RunParams(type="sim_trade"),
+                # Minimal v0.8.0 compatibility for strategies that inspect end_date in
+                # after_close callbacks. This is not a full JoinQuant backtest range.
+                run_params=RunParams(type="sim_trade", end_date=now.date(), frequency="minute"),
             )
             scheduler = Scheduler()
             session = RuntimeSession(self.strategy_id, context, g, log, scheduler, self.data, self.broker)
@@ -345,6 +347,7 @@ def _portfolio_to_dict(portfolio: Portfolio) -> dict[str, Any]:
                 "price": position.price,
                 "avg_cost": position.avg_cost,
                 "value": position.value,
+                "last_trade_date": position.last_trade_date,
             }
             for security, position in portfolio.positions.items()
         },
@@ -363,6 +366,7 @@ def _portfolio_from_dict(data: dict[str, Any] | None, initial_cash: float) -> Po
             price=float(position_data.get("price", 0.0)),
             avg_cost=float(position_data.get("avg_cost", 0.0)),
             value=float(position_data.get("value", 0.0)),
+            last_trade_date=position_data.get("last_trade_date"),
         )
     return Portfolio(
         starting_cash=float(data.get("starting_cash", initial_cash)),

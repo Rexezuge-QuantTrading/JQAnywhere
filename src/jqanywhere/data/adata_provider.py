@@ -154,7 +154,9 @@ class ADataMarketDataProvider(MarketDataProvider):
             return pd.DataFrame(columns=["display_name", "name", "start_date", "end_date", "type"])
         return pd.concat(frames).sort_index()
 
-    def get_security_info(self, code: str) -> SecurityInfo:
+    def get_security_info(self, code: str, date=None) -> SecurityInfo:
+        if date is not None:
+            _coerce_date(date)
         security_type = _infer_security_type(code)
         search_types = [security_type] if security_type else ["stock", "fund", "index", "bond"]
         securities = self.get_all_securities(search_types)
@@ -183,6 +185,8 @@ class ADataMarketDataProvider(MarketDataProvider):
         if info == "is_st":
             values = {code: self.get_current_data()[code].is_st for code in securities}
         elif info in {"unit_net_value", "acc_net_value", "adj_net_value"}:
+            if _requires_historical_extras(start_date, end_date, count):
+                raise NotImplementedError("AData extras for ETF net value are latest metadata only, not historical JoinQuant extras")
             values = self._etf_unit_net_values(securities)
         else:
             raise NotImplementedError(f"AData does not expose extras field: {info}")
@@ -295,8 +299,10 @@ class ADataMarketDataProvider(MarketDataProvider):
 
         for _attempt in range(2):
             try:
-                if _is_etf(code):
+                if _is_exchange_fund(code):
                     if unit_kind == "m":
+                        # AData exposes one exchange-fund minute endpoint. LOF/QDII
+                        # coverage depends on upstream data and fails explicitly below.
                         raw = self.adata.fund.market.get_market_etf_min(fund_code=code)
                     else:
                         raw = self.adata.fund.market.get_market_etf(
@@ -402,7 +408,7 @@ class ADataMarketDataProvider(MarketDataProvider):
     def _fetch_current_data(self, security: str) -> CurrentData:
         code = _security_code(security)
         try:
-            if _is_etf(code):
+            if _is_exchange_fund(code):
                 raw = self.adata.fund.market.get_market_etf_current(fund_code=code)
             elif _is_index_security(security):
                 raw = self.adata.stock.market.get_market_index_current(index_code=code)
@@ -421,14 +427,19 @@ class ADataMarketDataProvider(MarketDataProvider):
         paused = price is None or pd.isna(price) or volume is None or float(volume) == 0
         if self.strict_current_date and trade_date is not None:
             paused = paused or _parse_date(trade_date) != date.today()
+        high_limit = _float_or_none(_row_get(row, "high_limit"))
+        low_limit = _float_or_none(_row_get(row, "low_limit"))
         return CurrentData(
             security=security,
             paused=paused,
             last_price=_float_or_none(price),
             high=_float_or_none(_row_get(row, "high")),
             low=_float_or_none(_row_get(row, "low")),
-            high_limit=_float_or_none(_row_get(row, "high_limit")),
-            low_limit=_float_or_none(_row_get(row, "low_limit")),
+            # Some upstream ETF/fund quotes omit limit prices. JoinQuant exposes
+            # numeric attributes, so use non-blocking bounds rather than returning
+            # None and crashing common strategy guard comparisons.
+            high_limit=high_limit if high_limit is not None else float("inf"),
+            low_limit=low_limit if low_limit is not None else 0.0,
             is_st=_bool_or_none(_first_row_value(row, "is_st", "st")),
             day_open=_float_or_none(_first_row_value(row, "day_open", "open")),
             pre_close=_float_or_none(_row_get(row, "pre_close")),
@@ -491,8 +502,8 @@ def _patch_adata_static_ths_cookie(adata_module: Any) -> None:
         common_utils.cookie = cookie
 
 
-def _is_etf(code: str) -> bool:
-    return code.startswith(("51", "15", "58", "56"))
+def _is_exchange_fund(code: str) -> bool:
+    return code.startswith(("15", "16", "18", "50", "51", "56", "58"))
 
 
 def _is_index_security(security: str) -> bool:
@@ -537,7 +548,7 @@ def _is_open_trade_day(value) -> bool:
 
 def _infer_security_type(code: str) -> str | None:
     security_code = _security_code(code)
-    if _is_etf(security_code):
+    if _is_exchange_fund(security_code):
         return "fund"
     if _is_index_security(code):
         return "index"
@@ -720,6 +731,14 @@ def _extras_index(start_date=None, end_date=None, count=None):
     start = pd.to_datetime(start_date if start_date is not None else end_date)
     end = pd.to_datetime(end_date if end_date is not None else start_date)
     return pd.date_range(start=start, end=end, freq="D")
+
+
+def _requires_historical_extras(start_date=None, end_date=None, count=None) -> bool:
+    if start_date is None and end_date is None:
+        return False
+    today = date.today()
+    dates = _extras_index(start_date, end_date, count)
+    return any(item.date() != today for item in dates)
 
 
 def _jq_industry_payload(raw) -> dict:

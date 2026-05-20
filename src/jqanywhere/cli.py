@@ -12,7 +12,7 @@ from jqanywhere.runtime.factory import build_engine
 
 SUPPORTED_API = [
     "initialize(context)",
-    "run_daily(func, time, reference_security='') with HH:MM or before_open/open/close/after_close",
+    "run_daily(func, time, reference_security='') with HH:MM, every_bar, or before_open/open/close/after_close",
     "run_weekly(func, weekday, time, reference_security='')",
     "run_monthly(func, monthday, time, reference_security='')",
     "before_trading_start(context), after_trading_end(context)",
@@ -22,7 +22,7 @@ SUPPORTED_API = [
     "get_all_securities, get_security_info, get_trade_days, get_all_trade_days",
     "query, valuation, balance, cash_flow, income, indicator, get_fundamentals where provider supports fundamentals",
     "get_valuation, get_industry, get_extras where provider supports those datasets",
-    "record, OrderStatus, context.run_params",
+    "record, OrderStatus, context.run_params including v0.8.0 end_date shim",
     "order, order_target, order_value, order_target_value",
     "jqanywhere doctor",
 ]
@@ -33,7 +33,7 @@ UNSUPPORTED_API = [
     "macro.run_query",
     "factor APIs beyond import-compatible jqfactor stubs",
     "portfolio optimizer",
-    "every_bar and tick/minute event loops",
+    "internal tick/minute event loops; every_bar requires external per-minute invocations",
     "futures and margin trading",
 ]
 
@@ -53,7 +53,7 @@ def main(argv: list[str] | None = None) -> None:
     invoke_parser.add_argument("--now", default=None, help="Invocation time as an ISO-8601 datetime")
     invoke_parser.add_argument("--json", action="store_true", help="Print machine-readable JSON")
 
-    list_api_parser = subparsers.add_parser("list-api", help="List v0.7 API surface")
+    list_api_parser = subparsers.add_parser("list-api", help="List v0.8.0 API surface")
     list_api_parser.add_argument("--json", action="store_true", help="Print machine-readable JSON")
 
     doctor_parser = subparsers.add_parser("doctor", help="Check config and selected providers")

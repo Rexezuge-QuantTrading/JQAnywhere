@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import date, datetime
+
 from jqanywhere.broker.base import Broker
 from jqanywhere.jqcompat.types import (
     Context,
@@ -20,6 +22,8 @@ from jqanywhere.runtime.state import get_session
 class PaperBroker(Broker):
     def sync_portfolio(self, context: Context) -> None:
         for security, position in list(context.portfolio.positions.items()):
+            if _position_last_trade_date(position) != context.current_dt.date():
+                position.closeable_amount = position.total_amount
             price = _order_price(context, security, {})
             if price > 0:
                 position.price = price
@@ -37,7 +41,7 @@ class PaperBroker(Broker):
         if current_data is not None and current_data.paused:
             order = _rejected_order(context, security, 0, 0.0, price, "paused")
             _record_order(context, order)
-            return order
+            return None
 
         target_value = max(float(value), 0.0)
         current = context.portfolio.positions.get(security)
@@ -62,7 +66,7 @@ class PaperBroker(Broker):
         if _blocked_by_price_limit(current_data, execution_price, delta_amount):
             order = _rejected_order(context, security, delta_amount, 0.0, execution_price, "price_limit")
             _record_order(context, order)
-            return order
+            return None
 
         trade_value = abs(delta_amount) * execution_price
         commission = _commission(security, trade_value, delta_amount, kwargs)
@@ -82,20 +86,22 @@ class PaperBroker(Broker):
             if delta_amount <= 0:
                 order = _rejected_order(context, security, 0, 0.0, execution_price, "insufficient_cash")
                 _record_order(context, order)
-                return order
+                return None
             target_amount = current_amount + delta_amount
             context.portfolio.available_cash -= trade_value + commission
+            closeable_amount = current.closeable_amount if current else 0
         else:
             sell_amount = min(abs(delta_amount), current.closeable_amount if current else 0)
             if sell_amount <= 0:
                 order = _rejected_order(context, security, delta_amount, 0.0, execution_price, "insufficient_position")
                 _record_order(context, order)
-                return order
+                return None
             delta_amount = -sell_amount
             target_amount = current_amount - sell_amount
             trade_value = sell_amount * execution_price
             commission = _commission(security, trade_value, delta_amount, kwargs)
             context.portfolio.available_cash += trade_value - commission
+            closeable_amount = max((current.closeable_amount if current else 0) - sell_amount, 0)
 
         if target_amount <= 0:
             context.portfolio.positions.pop(security, None)
@@ -103,10 +109,13 @@ class PaperBroker(Broker):
             context.portfolio.positions[security] = Position(
                 security=security,
                 total_amount=target_amount,
-                closeable_amount=target_amount,
+                # Minimal China-market T+1 support: shares bought in the current
+                # invocation day stay non-closeable until a later trading-day run.
+                closeable_amount=closeable_amount,
                 price=execution_price,
                 avg_cost=_avg_cost(current, current_amount, delta_amount, execution_price),
                 value=target_amount * execution_price,
+                last_trade_date=context.current_dt.date().isoformat(),
             )
 
         order = Order(
@@ -139,7 +148,7 @@ class PaperBroker(Broker):
             price = _order_price(context, security, kwargs)
             order = _rejected_order(context, security, amount, 0.0, price, "insufficient_position")
             _record_order(context, order)
-            return order
+            return None
         return self.order_target(context, security, current_amount + amount, **kwargs)
 
 
@@ -197,6 +206,17 @@ def _blocked_by_price_limit(current_data, price: float, amount: int) -> bool:
     if amount > 0 and current_data.high_limit is not None and price >= current_data.high_limit:
         return True
     return amount < 0 and current_data.low_limit is not None and price <= current_data.low_limit
+
+
+def _position_last_trade_date(position: Position) -> date | None:
+    value = position.last_trade_date
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    if isinstance(value, str):
+        return datetime.fromisoformat(value).date()
+    return None
 
 
 def _avg_cost(current: Position | None, current_amount: int, delta_amount: int, price: float) -> float:

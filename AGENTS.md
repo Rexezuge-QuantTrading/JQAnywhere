@@ -13,7 +13,7 @@
 
 - Ruff is the formatter and linter source of truth in `pyproject.toml`; no Black, isort, mypy, or pre-commit config exists currently.
 - Ruff targets `py313` with `line-length = 140`, double quotes, spaces, LF endings, and source roots `src`, `tests`, `examples`.
-- The project requires Python `>=3.11`, is packaged as version `0.7.0`, and depends on `adata`, `boto3`, `numpy`, `pandas`, and `TA-Lib`.
+- The project requires Python `>=3.11`, is packaged as version `0.8.0`, and depends on `adata`, `boto3`, `numpy`, `pandas`, and `TA-Lib`.
 - Keep the configured per-file Ruff ignores for JoinQuant compatibility: examples may use `from jqdata import *`, `src/jqanywhere/jqcompat/api.py` re-exports wildcard API types, and `src/jqdata/__init__.py` intentionally re-exports compatibility globals.
 
 ## Git Commit Messages
@@ -45,8 +45,9 @@
 - Main local CLI entrypoint is `jqanywhere.cli:main`; Lambda entrypoint is `jqanywhere.runtime.lambda_handler.run`.
 - Runtime construction is centralized in `src/jqanywhere/runtime/factory.py`; it selects `empty`, `adata`, or `remote_miniqmt` data, `paper` or `remote_miniqmt` broker, memory or DynamoDB state, and console or SNS notifier from config/env.
 - `RuntimeEngine.run()` loads the strategy file, requires `initialize(context)`, runs due scheduled jobs and lifecycle hooks, persists `g` plus portfolio/order metadata, sends logs, records failed-run metadata, and always resets the runtime session token.
-- Supported v0.6 compatibility includes daily/weekly/monthly scheduling, safe daily schedule aliases, optional `before_trading_start` and `after_trading_end`, `context.current_dt`, `context.previous_date` when a trade calendar is available, market-data APIs, paper order APIs, duplicate scheduled-run skipping, stale active-run recovery, and structured `completed`/`skipped`/`failed` results.
-- `src/jqanywhere/data/adata_provider.py` adapts AData 2.9.x for China stocks, ETFs, indexes, convertible-bond metadata, current data, daily/history data, and trade calendars; keep upstream AData limitations explicit.
+- Supported v0.8.0 compatibility includes daily/weekly/monthly scheduling, safe daily schedule aliases, externally driven `every_bar` minute scheduling, optional `before_trading_start` and `after_trading_end`, `context.current_dt`, `context.previous_date` when a trade calendar is available, `context.run_params.end_date` as a single-run shim, market-data APIs, paper order APIs with JoinQuant-style `None` on order creation failure, duplicate scheduled-run skipping, stale active-run recovery, and structured `completed`/`skipped`/`failed` results.
+- `src/jqanywhere/data/adata_provider.py` adapts AData 2.9.x for China stocks, ETFs/LOFs/common exchange-traded fund code families, indexes, convertible-bond metadata, current data, daily/history data, and trade calendars; keep upstream AData limitations explicit. Historical ETF NAV extras are not implemented from latest metadata and should raise on dated requests.
+- `run_daily(..., time="every_bar")` is intentionally a minimal v0.8.0 implementation: JQAnywhere runs it only when invoked at an eligible trading minute and does not synthesize an internal 240-bar loop. Use EventBridge/cron per-minute schedules for live-style execution.
 - `src/jqanywhere/miniqmt_remote` is only an HTTPS JSON client for a separately deployed MiniQMT agent; do not add in-process `xtquant` runtime assumptions to this repo.
 
 ## Config And Deployment Gotchas
@@ -59,6 +60,6 @@
 
 ## Compatibility Constraints
 
-- Unsupported JoinQuant APIs should fail explicitly with `NotImplementedError` rather than silently doing the wrong thing; this includes `handle_data`, tick/minute event loop behavior, schedule aliases such as `open`/`close`/`every_bar`, fundamentals/query DSL, finance/macro query APIs, factor APIs, portfolio optimizer, futures, and margin trading.
+- Unsupported JoinQuant APIs should fail explicitly with `NotImplementedError` rather than silently doing the wrong thing; this includes `handle_data`, internal tick/minute event loops, unsupported market-data historical paths, fundamentals/query DSL when no provider implements it, finance/macro query APIs, factor APIs, portfolio optimizer, futures, and margin trading. `open`, `close`, `after_close`, and externally driven `every_bar` are supported scheduler aliases.
 - Live broker integration is intentionally a template/remote-agent extension point; see `src/jqanywhere/broker/template.py` and `src/jqanywhere/broker/remote_miniqmt.py` before adding broker behavior.
 - `remote_miniqmt` broker requires `runtime.mode = "live"`, an endpoint, and `account_id`; keep `enable_trading = false` until the external agent has been validated in read-only mode.

@@ -34,7 +34,7 @@ def test_simple_strategy_runs():
 
 
 def test_unsupported_fundamentals_is_explicit():
-    with pytest.raises(NotImplementedError, match="v0.7"):
+    with pytest.raises(NotImplementedError, match="v0.8.0"):
         EmptyMarketDataProvider().get_fundamentals(None)
 
 
@@ -118,6 +118,40 @@ def test_run_daily_only_runs_matching_time(tmp_path):
 
     assert early["state"]["ran"] is False
     assert due["state"]["ran"] is True
+
+
+def test_run_daily_every_bar_runs_during_trading_minutes(tmp_path):
+    strategy_path = tmp_path / "every_bar_strategy.py"
+    strategy_path.write_text(
+        "from jqdata import *\n"
+        "\n"
+        "def initialize(context):\n"
+        "    g.count = getattr(g, 'count', 0)\n"
+        "    run_daily(trade, 'every_bar')\n"
+        "\n"
+        "def trade(context):\n"
+        "    g.count += 1\n",
+        encoding="utf-8",
+    )
+    engine = RuntimeEngine(
+        strategy_id="every_bar",
+        strategy_path=strategy_path,
+        data=EmptyMarketDataProvider(),
+        broker=PaperBroker(),
+        state_store=MemoryStateStore(),
+        notifier=ConsoleNotifier(),
+        initial_cash=100_000,
+    )
+
+    before_open = engine.run(now=datetime(2026, 5, 18, 9, 29))
+    open_bar = engine.run(now=datetime(2026, 5, 18, 9, 30))
+    lunch_break = engine.run(now=datetime(2026, 5, 18, 11, 30))
+    afternoon_bar = engine.run(now=datetime(2026, 5, 18, 13, 0))
+
+    assert before_open["state"]["count"] == 0
+    assert open_bar["state"]["count"] == 1
+    assert lunch_break["state"]["count"] == 1
+    assert afternoon_bar["state"]["count"] == 2
 
 
 def test_runtime_persists_g_and_portfolio_across_runs(tmp_path):
@@ -296,8 +330,8 @@ def test_paper_broker_uses_market_price_costs_and_persists_order_history(tmp_pat
     assert result["portfolio"]["positions"]["000001.XSHE"]["total_amount"] == 10
 
 
-def test_v07_query_records_static_provider_and_reference_data(tmp_path):
-    strategy_path = tmp_path / "v07_strategy.py"
+def test_v08_query_records_static_provider_and_reference_data(tmp_path):
+    strategy_path = tmp_path / "v08_strategy.py"
     strategy_path.write_text(
         "from jqdata import *\n"
         "\n"
@@ -344,7 +378,7 @@ def test_v07_query_records_static_provider_and_reference_data(tmp_path):
         extras={"unit_net_value": {"510300.XSHG": 4.25}},
     )
     engine = RuntimeEngine(
-        strategy_id="v07",
+        strategy_id="v08",
         strategy_path=strategy_path,
         data=data,
         broker=PaperBroker(),
@@ -359,6 +393,34 @@ def test_v07_query_records_static_provider_and_reference_data(tmp_path):
     assert result["records"] == [{"time": "2026-05-18T09:50:00+08:00", "pick": "000001.XSHE", "nav": 4.25}]
 
 
+def test_context_run_params_exposes_v08_end_date_shim(tmp_path):
+    strategy_path = tmp_path / "run_params_strategy.py"
+    strategy_path.write_text(
+        "from jqdata import *\n"
+        "\n"
+        "def initialize(context):\n"
+        "    run_daily(trade, '15:30')\n"
+        "\n"
+        "def trade(context):\n"
+        "    g.end_date = context.run_params.end_date.isoformat()\n"
+        "    g.frequency = context.run_params.frequency\n",
+        encoding="utf-8",
+    )
+    engine = RuntimeEngine(
+        strategy_id="run_params",
+        strategy_path=strategy_path,
+        data=EmptyMarketDataProvider(),
+        broker=PaperBroker(),
+        state_store=MemoryStateStore(),
+        notifier=ConsoleNotifier(),
+        initial_cash=100_000,
+    )
+
+    result = engine.run(now=datetime(2026, 5, 18, 15, 30))
+
+    assert result["state"] == {"end_date": "2026-05-18", "frequency": "minute"}
+
+
 def test_history_and_order_status_match_joinquant_style(tmp_path):
     strategy_path = tmp_path / "history_order_strategy.py"
     strategy_path.write_text(
@@ -370,8 +432,7 @@ def test_history_and_order_status_match_joinquant_style(tmp_path):
         "def trade(context):\n"
         "    prices = history(1, unit='1d', field='close', security_list=['000001.XSHE'])\n"
         "    g.last_close = float(prices['000001.XSHE'][-1])\n"
-        "    order_target_value('000001.XSHE', 100)\n"
-        "    order = order_target_value('000001.XSHE', 0)\n"
+        "    order = order_target_value('000001.XSHE', 100)\n"
         "    g.held_status = order.status == OrderStatus.held\n"
         "    g.filled = order.filled\n",
         encoding="utf-8",
@@ -394,7 +455,7 @@ def test_history_and_order_status_match_joinquant_style(tmp_path):
     result = engine.run(now=datetime(2026, 5, 18, 9, 50))
 
     assert result["state"] == {"last_close": 10.0, "held_status": True, "filled": 10}
-    assert result["orders"][1]["filled"] == 10
+    assert result["orders"][0]["filled"] == 10
 
 
 def test_history_defaults_to_avg_and_keeps_datetime_index(tmp_path):
@@ -539,13 +600,17 @@ def test_paper_broker_uses_ref_slippage_and_close_today_commission(tmp_path):
         "from jqdata import *\n"
         "\n"
         "def initialize(context):\n"
+        "    g.count = getattr(g, 'count', 0)\n"
         "    set_slippage(PriceRelatedSlippage(0.1), ref='000001.XSHE')\n"
         "    set_order_cost(OrderCost(close_commission=0.01, close_today_commission=0.02), ref='000001.XSHE')\n"
         "    run_daily(trade, '09:50')\n"
         "\n"
         "def trade(context):\n"
-        "    order_target_value('000001.XSHE', 100)\n"
-        "    order_target_value('000001.XSHE', 0, close_today=True)\n",
+        "    if g.count == 0:\n"
+        "        order_target_value('000001.XSHE', 100)\n"
+        "    else:\n"
+        "        order_target_value('000001.XSHE', 0, close_today=True)\n"
+        "    g.count += 1\n",
         encoding="utf-8",
     )
     data = StaticMarketDataProvider(current=["000001.XSHE"])
@@ -560,12 +625,78 @@ def test_paper_broker_uses_ref_slippage_and_close_today_commission(tmp_path):
         initial_cash=1_000,
     )
 
-    result = engine.run(now=datetime(2026, 5, 18, 9, 50))
+    first = engine.run(now=datetime(2026, 5, 18, 9, 50))
+    result = engine.run(now=datetime(2026, 5, 19, 9, 50))
 
-    assert result["orders"][0]["price"] == 11.0
+    assert first["orders"][0]["price"] == 11.0
     assert result["orders"][1]["price"] == 9.0
     assert result["orders"][1]["commission"] == 1.8
     assert result["orders"][1]["status"] == "held"
+
+
+def test_paper_broker_rejected_order_returns_none_to_strategy(tmp_path):
+    strategy_path = tmp_path / "rejected_order_strategy.py"
+    strategy_path.write_text(
+        "from jqdata import *\n"
+        "\n"
+        "def initialize(context):\n"
+        "    run_daily(trade, '09:50')\n"
+        "\n"
+        "def trade(context):\n"
+        "    g.order_is_none = order('000001.XSHE', -10) is None\n",
+        encoding="utf-8",
+    )
+    engine = RuntimeEngine(
+        strategy_id="rejected_order",
+        strategy_path=strategy_path,
+        data=EmptyMarketDataProvider(),
+        broker=PaperBroker(),
+        state_store=MemoryStateStore(),
+        notifier=ConsoleNotifier(),
+        initial_cash=1_000,
+    )
+
+    result = engine.run(now=datetime(2026, 5, 18, 9, 50))
+
+    assert result["state"] == {"order_is_none": True}
+    assert result["orders"][0]["status"] == "rejected"
+
+
+def test_paper_broker_keeps_same_day_buys_non_closeable(tmp_path):
+    strategy_path = tmp_path / "t1_strategy.py"
+    strategy_path.write_text(
+        "from jqdata import *\n"
+        "\n"
+        "def initialize(context):\n"
+        "    g.count = getattr(g, 'count', 0)\n"
+        "    run_daily(trade, '09:50')\n"
+        "\n"
+        "def trade(context):\n"
+        "    if g.count == 0:\n"
+        "        order_target_value('000001.XSHE', 100)\n"
+        "        g.same_day_closeable = context.portfolio.positions['000001.XSHE'].closeable_amount\n"
+        "    else:\n"
+        "        g.next_day_closeable = context.portfolio.positions['000001.XSHE'].closeable_amount\n"
+        "    g.count += 1\n",
+        encoding="utf-8",
+    )
+    data = StaticMarketDataProvider(current=["000001.XSHE"])
+    data.current["000001.XSHE"].last_price = 10.0
+    engine = RuntimeEngine(
+        strategy_id="t1",
+        strategy_path=strategy_path,
+        data=data,
+        broker=PaperBroker(),
+        state_store=MemoryStateStore(),
+        notifier=ConsoleNotifier(),
+        initial_cash=1_000,
+    )
+
+    first = engine.run(now=datetime(2026, 5, 18, 9, 50))
+    second = engine.run(now=datetime(2026, 5, 19, 9, 50))
+
+    assert first["state"]["same_day_closeable"] == 0
+    assert second["state"]["next_day_closeable"] == 10
 
 
 def test_order_management_apis_are_available(tmp_path):

@@ -63,11 +63,15 @@ class Position:
     price: float = 0.0
     avg_cost: float = 0.0
     value: float = 0.0
+    last_trade_date: Any = None
 
 
 @dataclass
 class RunParams:
     type: str = "sim_trade"
+    start_date: Any = None
+    end_date: Any = None
+    frequency: str = "minute"
 
 
 @dataclass
