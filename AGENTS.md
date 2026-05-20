@@ -62,6 +62,7 @@
 
 ## Compatibility Constraints
 
+- This is critical financial code. Any API advertised as JoinQuant-compatible must either match JoinQuant behavior exactly for the supported inputs or fail explicitly; never return approximated, fabricated, best-effort, placeholder, or partially compatible financial data.
 - Unsupported JoinQuant APIs should fail explicitly with `NotImplementedError` rather than silently doing the wrong thing; this includes `handle_data`, internal tick/minute event loops, historical backtest/research orchestration, unsupported market-data historical paths, fundamentals/query DSL when no provider implements it, finance/macro query APIs, factor APIs, portfolio optimizer, futures, and margin trading. `open`, `close`, `after_close`, and externally driven `every_bar` are supported scheduler aliases.
 - Live broker integration is intentionally a template/remote-agent extension point; see `src/jqanywhere/broker/template.py` and `src/jqanywhere/broker/remote_miniqmt.py` before adding broker behavior.
 - `remote_miniqmt` broker requires `runtime.mode = "live"`, an endpoint, and `account_id`; keep `enable_trading = false` until the external agent has been validated in read-only mode.

@@ -172,6 +172,58 @@ class RemoteMiniQmtMarketDataProvider(MarketDataProvider):
         response = self.client.post("/v1/market/trade-days", {})
         return [_coerce_date(day) for day in response.get("days", [])]
 
+    def get_money_flow(self, security_list, start_date=None, end_date=None, fields=None, count=None):
+        securities = [security_list] if isinstance(security_list, str) else list(security_list)
+        field_list = _field_list(fields or ["date", "sec_code", "change_pct"])
+        response = self.client.post(
+            "/v1/market/money-flow",
+            {
+                "securities": securities,
+                "start_date": _date_value(start_date),
+                "end_date": _date_value(end_date),
+                "fields": field_list,
+                "count": count,
+            },
+        )
+        return _frame_from_rows(_rows(response), field_list).reset_index(drop=True)
+
+    def get_bars(
+        self, security, count: int, unit: str = "", fields=None, include_now: bool = False, end_dt=None, fq_ref_date=None, df=False
+    ):
+        securities = [security] if isinstance(security, str) else list(security)
+        field_list = _field_list(fields or ["date", "open", "high", "low", "close"])
+        response = self.client.post(
+            "/v1/market/bars",
+            {
+                "securities": securities,
+                "count": count,
+                "unit": unit,
+                "fields": field_list,
+                "include_now": include_now,
+                "end_dt": _date_value(end_dt),
+                "fq_ref_date": _date_value(fq_ref_date),
+                "df": df,
+            },
+        )
+        result = _frame_from_rows(_rows(response), field_list)
+        return result if df else result.to_records(index=False)
+
+    def get_industries(self, name: str, date=None):
+        response = self.client.post("/v1/market/industries", {"name": name, "date": _date_value(date)})
+        rows = response.get("rows", response.get("data", []))
+        data = pd.DataFrame(rows)
+        if "code" in data.columns:
+            data = data.set_index("code")
+        return data
+
+    def get_industry_stocks(self, industry_code: str, date=None) -> list[str]:
+        response = self.client.post("/v1/market/industry-stocks", {"industry_code": industry_code, "date": _date_value(date)})
+        return list(response.get("securities", response.get("stocks", [])))
+
+    def finance_run_query(self, query):
+        response = self.client.post("/v1/market/finance-query", {"query": _query_payload(query)})
+        return pd.DataFrame(response.get("rows", response.get("data", [])))
+
     def _fetch_current_data(self, security: str) -> CurrentData:
         response = self.client.post("/v1/market/current", {"securities": [security]})
         payload = _first_current_payload(response, security)
@@ -205,6 +257,7 @@ def _query_payload(query) -> dict[str, Any]:
         "order_by": [str(sort_key.expression) for sort_key in getattr(query, "sort_keys", [])],
         "ascending": [sort_key.ascending for sort_key in getattr(query, "sort_keys", [])],
         "limit": getattr(query, "limit_count", None),
+        "tables": sorted(getattr(query, "table_names", set())),
     }
 
 
@@ -218,10 +271,12 @@ def _frame_from_rows(rows: list[dict[str, Any]], fields: list[str]) -> pd.DataFr
         return pd.DataFrame(columns=fields)
     index_column = next((column for column in ("datetime", "date", "time") if column in data.columns), None)
     if index_column is not None:
-        data.index = pd.to_datetime(data.pop(index_column))
+        data.index = pd.to_datetime(data[index_column])
+        if index_column not in fields:
+            data = data.drop(columns=[index_column])
     for field in fields:
         if field not in data.columns:
-            data[field] = pd.NA
+            raise NotImplementedError(f"remote MiniQMT response does not include required field: {field}")
     return data[fields]
 
 

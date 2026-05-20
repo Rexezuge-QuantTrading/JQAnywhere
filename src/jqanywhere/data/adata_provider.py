@@ -178,6 +178,15 @@ class ADataMarketDataProvider(MarketDataProvider):
         securities = [security] if isinstance(security, str) else list(security)
         return {code: self._industry_for_security(code, query_date) for code in securities}
 
+    def get_fundamentals(self, query, date=None, statDate=None):
+        raise NotImplementedError("AData does not expose exact JoinQuant fundamentals/query tables")
+
+    def get_valuation(self, security, start_date=None, end_date=None, fields=None, count=None):
+        raise NotImplementedError("AData does not expose exact JoinQuant valuation data")
+
+    def finance_run_query(self, query):
+        raise NotImplementedError("AData does not expose exact JoinQuant finance.run_query tables")
+
     def get_extras(self, info, security_list, start_date=None, end_date=None, df=True, count=None):
         if info not in _EXTRA_FIELDS:
             raise NotImplementedError(f"AData does not expose extras field: {info}")
@@ -195,6 +204,42 @@ class ADataMarketDataProvider(MarketDataProvider):
         for code in securities:
             result[code] = values.get(code, pd.NA)
         return result if df else {code: result[code].to_numpy() for code in result.columns}
+
+    def get_money_flow(self, security_list, start_date=None, end_date=None, fields=None, count=None):
+        securities = [security_list] if isinstance(security_list, str) else list(security_list)
+        field_list = _field_list(fields or ["date", "sec_code", "change_pct"])
+        unsupported = set(field_list) - {"date", "sec_code", "change_pct"}
+        if unsupported:
+            raise NotImplementedError(f"AData get_money_flow does not expose JoinQuant fields: {', '.join(sorted(unsupported))}")
+        frames = []
+        for code in securities:
+            price = self.get_price(code, start_date=start_date, end_date=end_date, count=count + 1 if count else None, fields=["close"])
+            data = pd.DataFrame(index=price.index)
+            data["date"] = data.index.date
+            data["sec_code"] = code
+            data["change_pct"] = price["close"].pct_change() * 100
+            if count is not None:
+                data = data.tail(count)
+            frames.append(data.reset_index(drop=True))
+        result = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame(columns=field_list)
+        return result[field_list]
+
+    def get_bars(
+        self, security, count: int, unit: str = "", fields=None, include_now: bool = False, end_dt=None, fq_ref_date=None, df=False
+    ):
+        del fq_ref_date
+        if not include_now and end_dt is None:
+            end_dt = _history_end(_normalize_frequency(unit or "1d")[1])
+        field_list = _field_list(fields or ["date", "open", "high", "low", "close"])
+        price_fields = [field for field in field_list if field != "date"]
+        result = self.get_price(security, end_date=end_dt, frequency=unit or "1d", fields=price_fields, count=count, panel=False)
+        result = result.copy()
+        if "date" in field_list:
+            if isinstance(security, str):
+                result.insert(0, "date", result.index)
+            else:
+                result.insert(0, "date", result["time"])
+        return result[field_list] if df else result[field_list].to_records(index=False)
 
     def _fetch_trade_calendar(self) -> pd.DataFrame:
         stock_info = getattr(getattr(self.adata, "stock", None), "info", None)
@@ -509,7 +554,7 @@ def _patch_adata_static_ths_cookie(adata_module: Any) -> None:
 
 
 def _is_exchange_fund(code: str) -> bool:
-    return code.startswith(("15", "16", "18", "50", "51", "56", "58"))
+    return code.startswith(("15", "16", "18", "50", "51", "52", "56", "58"))
 
 
 def _is_index_security(security: str) -> bool:

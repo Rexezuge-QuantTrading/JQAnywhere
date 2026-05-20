@@ -481,3 +481,26 @@ def test_adata_get_price_supports_index_daily_history(monkeypatch):
     result = ADataMarketDataProvider().get_price("000300.XSHG", end_date="2026-05-15", count=1, fields=["close"])
 
     assert result["close"].tolist() == [3020.0]
+
+
+def test_adata_get_money_flow_supports_change_pct_only(monkeypatch):
+    market = types.SimpleNamespace(get_market=lambda **kwargs: _stock_history())
+    _install_adata(monkeypatch, stock_market=market)
+
+    result = ADataMarketDataProvider().get_money_flow("000001.XSHE", fields=["sec_code", "change_pct"], count=2)
+
+    assert result["sec_code"].tolist() == ["000001.XSHE", "000001.XSHE"]
+    assert result["change_pct"].round(6).tolist() == [8.695652, 8.0]
+
+    with pytest.raises(NotImplementedError, match="net_amount_main"):
+        ADataMarketDataProvider().get_money_flow("000001.XSHE", fields=["net_amount_main"], count=1)
+
+
+def test_adata_get_bars_maps_price_data(monkeypatch):
+    market = types.SimpleNamespace(get_market=lambda **kwargs: _stock_history())
+    _install_adata(monkeypatch, stock_market=market)
+
+    result = ADataMarketDataProvider().get_bars("000001.XSHE", 2, unit="1d", fields=["date", "close"], df=True)
+
+    assert list(result.columns) == ["date", "close"]
+    assert result["close"].tolist() == [12.5, 13.5]
