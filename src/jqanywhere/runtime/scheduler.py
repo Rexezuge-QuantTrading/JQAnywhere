@@ -14,6 +14,7 @@ _TIME_ALIASES = {
     "close": "15:00",
     "after_close": "15:30",
 }
+_EVERY_BAR = "every_bar"
 
 
 @dataclass(frozen=True)
@@ -51,7 +52,10 @@ class Scheduler:
 
 
 def _is_due(job: ScheduledJob, now: datetime, trade_days=None) -> bool:
-    if _parse_time(job.time) != (now.hour, now.minute):
+    if job.time == _EVERY_BAR:
+        if not _is_every_bar_minute(now):
+            return False
+    elif _parse_time(job.time) != (now.hour, now.minute):
         return False
     if job.frequency == "daily":
         return True
@@ -82,13 +86,24 @@ def _same_period(day, today, period: str) -> bool:
 
 
 def _parse_time(value: str) -> tuple[int, int]:
+    if value == _EVERY_BAR:
+        return (-1, -1)
     if value in _TIME_ALIASES:
         value = _TIME_ALIASES[value]
     match = _TIME_PATTERN.match(value)
     if not match:
-        raise NotImplementedError("JQAnywhere v0.6 scheduled jobs support HH:MM plus before_open/open/close/after_close aliases")
+        raise NotImplementedError(
+            "JQAnywhere v0.8.0 scheduled jobs support HH:MM, every_bar, and before_open/open/close/after_close aliases"
+        )
     hour = int(match.group("hour"))
     minute = int(match.group("minute"))
     if hour > 23 or minute > 59:
         raise ValueError("run_daily time must be a valid HH:MM time")
     return hour, minute
+
+
+def _is_every_bar_minute(now: datetime) -> bool:
+    # Minimal v0.8.0 support: every_bar is driven by external per-minute invocations.
+    # JQAnywhere does not synthesize a 240-bar intraday loop inside one run.
+    minute_of_day = now.hour * 60 + now.minute
+    return (9 * 60 + 30 <= minute_of_day <= 11 * 60 + 29) or (13 * 60 <= minute_of_day <= 14 * 60 + 59)

@@ -3,7 +3,7 @@ JQAnywhere
 
 JQAnywhere is an MIT-licensed Python framework for running JoinQuant-style strategies on AWS-compatible infrastructure. The goal is to let users copy a supported JoinQuant strategy file unchanged, keep `from jqdata import *`, and run it locally, on AWS, or on LocalStack.
 
-Status: v0.7 alpha.
+Status: v0.8.0 alpha.
 
 Quick Start
 -----------
@@ -58,11 +58,12 @@ Internally, JQAnywhere separates runtime concerns:
 - `jqanywhere.persistence`: state stores such as memory and DynamoDB
 - `jqanywhere.notifications`: console and SNS notifications
 
-Supported In v0.7
------------------
+Supported In v0.8.0
+-------------------
 
 - `initialize(context)`
 - time-aware `run_daily(func, "HH:MM", reference_security="")`
+- `run_daily(func, "every_bar", reference_security="")` when JQAnywhere is invoked externally once per trading minute
 - deterministic `run_daily` schedule aliases: `before_open`, `open`, `close`, and `after_close`
 - calendar-aware `run_weekly(func, weekday, "HH:MM", reference_security="")`
 - calendar-aware `run_monthly(func, monthday, "HH:MM", reference_security="")`
@@ -71,6 +72,8 @@ Supported In v0.7
 - `context.current_dt`
 - `context.previous_date` when the selected data provider exposes a trade calendar
 - `context.run_params.type`
+- `context.run_params.end_date` as a v0.8.0 single-run compatibility shim; this is not a full JoinQuant backtest range
+- `context.run_params.frequency`
 - `set_option`
 - `set_benchmark`
 - `set_slippage`
@@ -99,7 +102,7 @@ Supported In v0.7
 - `get_open_orders`
 - `get_orders`
 - `get_trades` as an import-compatible empty trade map
-- paper portfolio accounting with market-data-based fills, fixed slippage, configured commission/order cost, rejection reasons, and order history
+- paper portfolio accounting with market-data-based fills, fixed slippage, configured commission/order cost, rejection reasons, T+1-style closeable amounts, and order history
 - persisted paper portfolio cash and positions
 - persisted order history and failed-run metadata
 - duplicate scheduled-run skipping for repeated EventBridge timestamps
@@ -127,30 +130,30 @@ Supported In v0.7
 AData Provider
 --------------
 
-Set `[data].provider = "adata"` or `JQANYWHERE_DATA_PROVIDER=adata` to use AData-backed China market data. The v0.7 adapter maps JoinQuant-style APIs to the real `adata 2.9.x` SDK surface:
+Set `[data].provider = "adata"` or `JQANYWHERE_DATA_PROVIDER=adata` to use AData-backed China market data. The v0.8.0 adapter maps JoinQuant-style APIs to the real `adata 2.9.x` SDK surface:
 
 - stocks: daily prices, current quotes, code metadata, and latest-day minute data where AData exposes it
-- ETFs: daily prices, latest-day minute data, current quotes, and ETF metadata
+- ETFs, LOFs, and common exchange-traded fund code families: daily prices, latest-day minute data, current quotes, and ETF metadata where upstream AData exposes them
 - indexes: daily prices, latest-day minute data, current quotes, index metadata, and index constituents
 - convertible bonds: metadata through `get_all_securities(types="bond")`
 - trade calendars through `get_trade_days` and `get_all_trade_days`
 - Shenwan industry metadata through `get_industry` when the installed AData SDK exposes it
-- ETF net-value extras through `get_extras("unit_net_value", ...)`, `get_extras("acc_net_value", ...)`, and `get_extras("adj_net_value", ...)` where the installed AData SDK exposes those fields
+- latest ETF net-value extras through `get_extras("unit_net_value", ...)`, `get_extras("acc_net_value", ...)`, and `get_extras("adj_net_value", ...)` where the installed AData SDK exposes those fields
 
 Known AData-backed limits:
 
 - historical minute data is only supported where the upstream AData endpoint exposes it; stock, ETF, and index minute endpoints are latest-trading-day oriented
+- historical ETF net-value extras are not implemented from AData latest metadata; dated requests fail explicitly rather than silently introducing lookahead
 - JoinQuant fundamentals/query DSL is import-compatible but not implemented from AData finance data because AData only exposes selected core financial indicators
 - `fq="pre"` is the safest stock adjustment mode; other adjustment modes depend on upstream AData behavior
 
-Unsupported In v0.7
--------------------
+Unsupported In v0.8.0
+---------------------
 
 These APIs are deliberately unsupported and should raise explicit `NotImplementedError` errors instead of silently doing the wrong thing:
 
 - `handle_data`
-- tick/minute event loop
-- tick/minute event-loop schedule alias `every_bar`
+- internal tick/minute event loops; v0.8.0 `every_bar` support depends on external per-minute invocations and does not synthesize all intraday bars inside one run
 - fundamentals/query execution when the selected provider does not implement fundamentals
 - `finance.run_query`
 - `macro.run_query`
@@ -203,6 +206,7 @@ Operational Notes
 - Runtime failures persist `last_status="failed"`, `last_failed_at`, and `last_error`; failed scheduled runs are retryable because they do not advance `last_run_key`.
 - Unknown providers such as `[data].provider = "bad"` fail during config loading instead of silently falling back to defaults.
 - Paper trading is still a deterministic approximation. Market orders use current data or recent close when available, apply configured fixed slippage and cost settings, and reject paused or limit-blocked securities, but it is not a live broker simulator.
+- Paper order creation failures return `None` to strategies, matching JoinQuant-style failure checks, while rejected order details remain in returned run history for diagnostics.
 - Paper portfolios mark persisted positions to available current or recent prices before each run so local account value reflects price movement between scheduled invocations.
 
 Broker Integration

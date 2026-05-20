@@ -84,6 +84,29 @@ def test_adata_attribute_history_maps_etf_fields(monkeypatch):
     assert result["money"].tolist() == [110.0, 120.0]
 
 
+def test_adata_attribute_history_treats_lof_codes_as_exchange_funds(monkeypatch):
+    calls = []
+
+    def get_market_etf(**kwargs):
+        calls.append(kwargs)
+        return pd.DataFrame(
+            {
+                "trade_date": ["2026-05-15"],
+                "close": [1.2],
+                "amount": [120.0],
+                "volume": [1000],
+            }
+        )
+
+    market = types.SimpleNamespace(get_market_etf=get_market_etf, get_market_etf_current=lambda **kwargs: pd.DataFrame())
+    _install_adata(monkeypatch, fund_market=market)
+
+    result = ADataMarketDataProvider().attribute_history("501018.XSHG", 1, "1d", ["close"], True, True, "pre")
+
+    assert result["close"].tolist() == [1.2]
+    assert calls[0]["fund_code"] == "501018"
+
+
 def test_adata_current_data_fetches_lazily(monkeypatch):
     calls = []
 
@@ -273,6 +296,19 @@ def test_adata_current_data_maps_supported_attributes(monkeypatch):
     assert data.industry_code == "J66"
 
 
+def test_adata_current_data_uses_safe_price_limit_fallbacks(monkeypatch):
+    market = types.SimpleNamespace(
+        get_market_etf_current=lambda **kwargs: pd.DataFrame({"price": [1.23], "volume": [100], "trade_date": ["2026-05-15"]})
+    )
+    _install_adata(monkeypatch, fund_market=market)
+
+    data = ADataMarketDataProvider().get_current_data()["518880.XSHG"]
+
+    assert data.paused is False
+    assert data.high_limit == float("inf")
+    assert data.low_limit == 0.0
+
+
 def test_adata_get_index_stocks_maps_codes(monkeypatch):
     info = types.SimpleNamespace(index_constituent=lambda **kwargs: pd.DataFrame({"stock_code": ["600000", "000001"]}))
     _install_adata(monkeypatch, stock_info=info)
@@ -343,13 +379,21 @@ def test_adata_get_industry_maps_sw_payload(monkeypatch):
     assert calls == [{"stock_code": "000001", "date": "2026-05-15"}]
 
 
-def test_adata_get_extras_maps_etf_unit_net_value(monkeypatch):
+def test_adata_get_extras_maps_current_etf_unit_net_value(monkeypatch):
     fund_info = types.SimpleNamespace(all_etf_exchange_traded_info=lambda: pd.DataFrame({"fund_code": ["510300"], "net_value": [4.25]}))
     _install_adata(monkeypatch, fund_info=fund_info)
 
-    result = ADataMarketDataProvider().get_extras("unit_net_value", "510300.XSHG", start_date="2026-05-15", end_date="2026-05-15")
+    result = ADataMarketDataProvider().get_extras("unit_net_value", "510300.XSHG", count=1)
 
-    assert result.loc[pd.Timestamp("2026-05-15"), "510300.XSHG"] == 4.25
+    assert result.iloc[-1]["510300.XSHG"] == 4.25
+
+
+def test_adata_get_extras_rejects_historical_etf_net_value_shortcut(monkeypatch):
+    fund_info = types.SimpleNamespace(all_etf_exchange_traded_info=lambda: pd.DataFrame({"fund_code": ["510300"], "net_value": [4.25]}))
+    _install_adata(monkeypatch, fund_info=fund_info)
+
+    with pytest.raises(NotImplementedError, match="latest metadata only"):
+        ADataMarketDataProvider().get_extras("unit_net_value", "510300.XSHG", start_date="2026-05-15", end_date="2026-05-15")
 
 
 def test_adata_get_extras_validates_official_fields(monkeypatch):
