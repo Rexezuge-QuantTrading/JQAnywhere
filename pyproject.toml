@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "JQAnywhere"
 version = "0.8.0"
-description = "Run JoinQuant-style Python strategies on AWS-compatible infrastructure."
+description = "Run JoinQuant-style Python strategies as live/event-driven trading jobs on AWS-compatible infrastructure."
 readme = "README.md"
 requires-python = ">=3.11"
 license = {text = "MIT"}

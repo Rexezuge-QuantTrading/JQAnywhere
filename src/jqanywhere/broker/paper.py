@@ -1,4 +1,4 @@
-"""Paper broker implementation."""
+"""Event-driven paper-trading broker implementation."""
 
 from __future__ import annotations
 
