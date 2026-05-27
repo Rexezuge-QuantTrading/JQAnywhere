@@ -1,0 +1,7 @@
+environment:
+  SNS_TOPIC_ARN: ''
+  MAIL_MEOW_BASE_URL: '${env:MAIL_MEOW_BASE_URL, ""}'
+  MAIL_MEOW_API_KEY: '${env:MAIL_MEOW_API_KEY, ""}'
+  NOTIFICATION_EMAIL: '${env:NOTIFICATION_EMAIL, ""}'
+resources:
+  Resources: {}

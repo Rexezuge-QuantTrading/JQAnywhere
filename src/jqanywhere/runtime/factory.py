@@ -12,6 +12,7 @@ from jqanywhere.data.base import EmptyMarketDataProvider
 from jqanywhere.data.remote_miniqmt import RemoteMiniQmtMarketDataProvider
 from jqanywhere.miniqmt_remote.client import MiniQmtHttpClient
 from jqanywhere.notifications.console import ConsoleNotifier
+from jqanywhere.notifications.mailmeow import MailMeowNotifier
 from jqanywhere.notifications.sns import SnsNotifier
 from jqanywhere.persistence.dynamodb import DynamoDBStateStore
 from jqanywhere.persistence.memory import MemoryStateStore
@@ -37,6 +38,12 @@ def build_engine(config: AppConfig) -> RuntimeEngine:
 
     if config.notifications.provider == "sns":
         notifier = SnsNotifier(endpoint_url=os.getenv("AWS_ENDPOINT_URL"))
+    elif config.notifications.provider == "mailmeow":
+        notifier = MailMeowNotifier(
+            base_url=config.notifications.mail_meow_base_url,
+            api_key=config.notifications.mail_meow_api_key,
+            to=config.notifications.email,
+        )
     elif config.notifications.provider == "console":
         notifier = ConsoleNotifier()
     else:

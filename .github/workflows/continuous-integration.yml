@@ -102,8 +102,15 @@ jobs:
         run: jqanywhere run --config examples/jqanywhere.toml --now 2026-05-18T09:50:00+08:00 --json
 
   serverless-floci-smoke:
-    name: Serverless Floci Smoke
+    name: Serverless Floci Smoke (${{ matrix.notification-provider }})
     runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        notification-provider:
+          - console
+          - sns
 
     env:
       AWS_ACCESS_KEY_ID: test
@@ -114,6 +121,7 @@ jobs:
       JQANYWHERE_AWS_ENDPOINT_URL: http://localhost.floci.io:4566
       JQANYWHERE_DATA_PROVIDER: empty
       JQANYWHERE_DATA_STRICT_CURRENT_DATE: "false"
+      JQANYWHERE_NOTIFIER: ${{ matrix.notification-provider }}
       LAMBDA_RUNTIME: python3.13
       LAMBDA_ARCHITECTURE: x86_64
       SERVERLESS_LICENSE_KEY: ${{ secrets.SERVERLESS_LICENSE_KEY }}
@@ -180,7 +188,17 @@ jobs:
         run: |
           aws --endpoint-url http://localhost:4566 lambda list-functions
           aws --endpoint-url http://localhost:4566 dynamodb describe-table --table-name jqanywhere-state
-          aws --endpoint-url http://localhost:4566 sns list-topics
+
+          topics="$(aws --endpoint-url http://localhost:4566 sns list-topics --query 'Topics[].TopicArn' --output text)"
+          if [ "${JQANYWHERE_NOTIFIER}" = "sns" ]; then
+            if [[ "${topics}" != *"jqanywhere-notifications"* ]]; then
+              printf 'Expected SNS notification topic for provider sns, found: %s\n' "${topics}"
+              exit 1
+            fi
+          elif [[ "${topics}" == *"jqanywhere-notifications"* ]]; then
+            printf 'Did not expect SNS notification topic for provider %s, found: %s\n' "${JQANYWHERE_NOTIFIER}" "${topics}"
+            exit 1
+          fi
 
       - name: Invoke Deployed Runner
         run: |

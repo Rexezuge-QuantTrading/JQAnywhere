@@ -1,0 +1,26 @@
+environment:
+  SNS_TOPIC_ARN:
+    Ref: NotificationTopic
+  MAIL_MEOW_BASE_URL: ''
+  MAIL_MEOW_API_KEY: ''
+  NOTIFICATION_EMAIL: ''
+resources:
+  Resources:
+    NotificationPublishPolicy:
+      Type: AWS::IAM::Policy
+      Properties:
+        PolicyName: '${self:service}-sns-publish'
+        Roles:
+          - Ref: IamRoleLambdaExecution
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - sns:Publish
+              Resource:
+                Ref: NotificationTopic
+    NotificationTopic:
+      Type: AWS::SNS::Topic
+      Properties:
+        TopicName: '${self:service}-notifications'
