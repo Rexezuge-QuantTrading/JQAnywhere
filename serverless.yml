@@ -21,10 +21,12 @@ provider:
     JQANYWHERE_BROKER: paper
     JQANYWHERE_PERSISTENCE: dynamodb
     JQANYWHERE_STATE_TABLE: '${self:service}-state'
-    JQANYWHERE_NOTIFIER: sns
+    JQANYWHERE_NOTIFIER: '${env:JQANYWHERE_NOTIFIER, "sns"}'
     AWS_ENDPOINT_URL: '${env:JQANYWHERE_AWS_ENDPOINT_URL, env:AWS_ENDPOINT_URL, ""}'
-    SNS_TOPIC_ARN:
-      Ref: NotificationTopic
+    SNS_TOPIC_ARN: '${file(./serverless/notifications/${env:JQANYWHERE_NOTIFIER, "sns"}.yml):environment.SNS_TOPIC_ARN}'
+    MAIL_MEOW_BASE_URL: '${file(./serverless/notifications/${env:JQANYWHERE_NOTIFIER, "sns"}.yml):environment.MAIL_MEOW_BASE_URL}'
+    MAIL_MEOW_API_KEY: '${file(./serverless/notifications/${env:JQANYWHERE_NOTIFIER, "sns"}.yml):environment.MAIL_MEOW_API_KEY}'
+    NOTIFICATION_EMAIL: '${file(./serverless/notifications/${env:JQANYWHERE_NOTIFIER, "sns"}.yml):environment.NOTIFICATION_EMAIL}'
   iam:
     role:
       statements:
@@ -34,11 +36,6 @@ provider:
             - dynamodb:PutItem
           Resource:
             - Fn::GetAtt: [StateTable, Arn]
-        - Effect: Allow
-          Action:
-            - sns:Publish
-          Resource:
-            Ref: NotificationTopic
 
 functions:
   runner:
@@ -49,22 +46,19 @@ functions:
       - schedule: '${env:JQANYWHERE_EVENTBRIDGE_SCHEDULE, "cron(50 1 * * ? *)"}'
 
 resources:
-  Resources:
-    StateTable:
-      Type: AWS::DynamoDB::Table
-      Properties:
-        TableName: '${self:provider.environment.JQANYWHERE_STATE_TABLE}'
-        AttributeDefinitions:
-          - AttributeName: id
-            AttributeType: S
-        KeySchema:
-          - AttributeName: id
-            KeyType: HASH
-        BillingMode: PAY_PER_REQUEST
-    NotificationTopic:
-      Type: AWS::SNS::Topic
-      Properties:
-        TopicName: '${self:service}-notifications'
+  - Resources:
+      StateTable:
+        Type: AWS::DynamoDB::Table
+        Properties:
+          TableName: '${self:provider.environment.JQANYWHERE_STATE_TABLE}'
+          AttributeDefinitions:
+            - AttributeName: id
+              AttributeType: S
+          KeySchema:
+            - AttributeName: id
+              KeyType: HASH
+          BillingMode: PAY_PER_REQUEST
+  - ${file(./serverless/notifications/${env:JQANYWHERE_NOTIFIER, "sns"}.yml):resources}
 
 package:
   patterns:

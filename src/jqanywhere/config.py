@@ -10,7 +10,7 @@ from pathlib import Path
 DATA_PROVIDERS = {"empty", "adata", "remote_miniqmt"}
 BROKER_PROVIDERS = {"paper", "remote_miniqmt"}
 PERSISTENCE_PROVIDERS = {"memory", "dynamodb"}
-NOTIFICATION_PROVIDERS = {"console", "sns"}
+NOTIFICATION_PROVIDERS = {"console", "mailmeow", "sns"}
 RUNTIME_MODES = {"paper", "live"}
 
 
@@ -57,6 +57,9 @@ class PersistenceConfig:
 @dataclass(frozen=True)
 class NotificationConfig:
     provider: str = "console"
+    mail_meow_base_url: str | None = None
+    mail_meow_api_key: str | None = None
+    email: str | None = None
 
 
 @dataclass(frozen=True)
@@ -119,6 +122,9 @@ def load_config(path: str | Path | None = None) -> AppConfig:
         ),
         notifications=NotificationConfig(
             provider=os.getenv("JQANYWHERE_NOTIFIER", notification_data.get("provider", "console")),
+            mail_meow_base_url=os.getenv("MAIL_MEOW_BASE_URL", notification_data.get("mail_meow_base_url")),
+            mail_meow_api_key=os.getenv("MAIL_MEOW_API_KEY", notification_data.get("mail_meow_api_key")),
+            email=os.getenv("NOTIFICATION_EMAIL", notification_data.get("email")),
         ),
     )
     validate_config(config)
@@ -132,6 +138,13 @@ def validate_config(config: AppConfig) -> None:
     _validate_choice(errors, "broker.provider", config.broker.provider, BROKER_PROVIDERS)
     _validate_choice(errors, "persistence.provider", config.persistence.provider, PERSISTENCE_PROVIDERS)
     _validate_choice(errors, "notifications.provider", config.notifications.provider, NOTIFICATION_PROVIDERS)
+    if config.notifications.provider == "mailmeow":
+        if not config.notifications.mail_meow_base_url:
+            errors.append("notifications.mail_meow_base_url or MAIL_MEOW_BASE_URL is required when notifications.provider is 'mailmeow'")
+        if not config.notifications.mail_meow_api_key:
+            errors.append("notifications.mail_meow_api_key or MAIL_MEOW_API_KEY is required when notifications.provider is 'mailmeow'")
+        if not config.notifications.email:
+            errors.append("notifications.email or NOTIFICATION_EMAIL is required when notifications.provider is 'mailmeow'")
     if config.broker.initial_cash < 0:
         errors.append("broker.initial_cash must be non-negative")
     if config.data.provider == "remote_miniqmt" and not config.data.endpoint:

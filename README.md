@@ -77,7 +77,7 @@ Internally, JQAnywhere separates runtime concerns:
 - `jqanywhere.data`: market data provider interface, empty provider, AData adapter, remote MiniQMT adapter
 - `jqanywhere.broker`: swappable broker interface, paper broker, remote MiniQMT broker, live broker template
 - `jqanywhere.persistence`: state stores such as memory and DynamoDB
-- `jqanywhere.notifications`: console and SNS notifications
+- `jqanywhere.notifications`: console, SNS, and MailMeow notifications
 
 Supported In v0.9.0
 -------------------
@@ -145,6 +145,7 @@ Supported In v0.9.0
 - DynamoDB state store
 - console notifications
 - SNS notifications
+- MailMeow notifications
 - AWS Lambda entrypoint
 - EventBridge event-time handling
 - Serverless deployment template
@@ -279,9 +280,12 @@ The repository includes `serverless.yml` with:
 - reserved Lambda concurrency defaulting to `1` to reduce overlapping scheduled runs
 - CloudWatch log retention through `LOG_RETENTION_DAYS`
 - DynamoDB state table
-- SNS topic
+- provider-specific notification resources under `serverless/notifications/`
+- SNS topic when `JQANYWHERE_NOTIFIER=sns`
 - Floci-compatible local AWS emulator deployment through Serverless local-stage endpoint configuration
 - package exclusions for `.venv`, `tests`, and `private` by default
+
+Set `JQANYWHERE_NOTIFIER` to `sns`, `console`, or `mailmeow` to select the Serverless notification fragment. `mailmeow` requires `MAIL_MEOW_BASE_URL`, `MAIL_MEOW_API_KEY`, and `NOTIFICATION_EMAIL`; missing values fail explicitly during config loading.
 
 GitHub Actions runs a Serverless smoke test against [Floci](https://github.com/floci-io/floci): it starts `floci/floci`, deploys the stack with Serverless Framework v4, verifies the Lambda/DynamoDB/SNS resources, and invokes the deployed `runner` Lambda. The workflow expects `SERVERLESS_LICENSE_KEY` to be configured as a GitHub secret for Serverless v4. `JQANYWHERE_AWS_ENDPOINT_URL` can override the `AWS_ENDPOINT_URL` injected into Lambda while host-side tools still use `AWS_ENDPOINT_URL`.
 
@@ -310,6 +314,9 @@ Useful environment variables:
 - `JQANYWHERE_PERSISTENCE`
 - `JQANYWHERE_STATE_TABLE`
 - `JQANYWHERE_NOTIFIER`
+- `MAIL_MEOW_BASE_URL`
+- `MAIL_MEOW_API_KEY`
+- `NOTIFICATION_EMAIL`
 - `AWS_ENDPOINT_URL`
 - `JQANYWHERE_AWS_ENDPOINT_URL` (Serverless-only Lambda endpoint override)
 - `JQANYWHERE_EVENTBRIDGE_SCHEDULE`
