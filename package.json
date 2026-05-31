@@ -5,7 +5,7 @@
   "description": "Serverless deployment tooling for JQAnywhere.",
   "license": "MIT",
   "devDependencies": {
-    "serverless": "4.36.1",
+    "serverless": "4.37.0",
     "serverless-localstack": "1.4.0"
   }
 }
